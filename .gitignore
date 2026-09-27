@@ -1,0 +1,115 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Environments & Secrets
+.venv/
+venv/
+env/
+ENV/
+.env
+.env.*
+*.env
+
+# Large Audio Datasets & Raw Media
+*.mp3
+*.wav
+*.flac
+*.m4a
+*.aac
+*.ogg
+*.opus
+*.webm
+
+# Data Partitions, Embeddings & Archives (kolo.0.data)
+kolo.0.data/pos/*
+!kolo.0.data/pos/.gitkeep
+kolo.0.data/neg/*
+!kolo.0.data/neg/.gitkeep
+kolo.0.data/discovery/*
+!kolo.0.data/discovery/.gitkeep
+kolo.0.data/downloads/*
+!kolo.0.data/downloads/.gitkeep
+kolo.0.data/imported/*
+!kolo.0.data/imported/.gitkeep
+kolo.0.data/playlists/*
+!kolo.0.data/playlists/.gitkeep
+kolo.0.data/.kolo/
+kolo.0.data/*_embeddings.json
+kolo.0.data/*_embeddings.npz
+kolo.0.data/*.npz
+kolo.0.data/*.npy
+kolo.0.data/*.zip
+kolo.0.data/*.tar*
+kolo.0.data/Spotify Account Data/
+kolo.0.data/*spotify*/
+kolo.0.data/*.csv
+
+# Numerical Arrays & Vector Dumps
+*.npz
+*.npy
+
+# Compressed Archives
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z
+
+# Machine Learning Models & Experiment Tracking
+models/
+*.joblib
+*.pkl
+*.pickle
+*.pt
+*.pth
+*.onnx
+mlruns/
+mlartifacts/
+mlruns.db*
+.trash/
+
+# Generated Predictions & CSVs
+ranked_songs.csv
+
+# Checkpoint & Temporary Files
+*.tmp
+*.tmp.*
+*.temp
+tmp_*
+
+# Tauri / Web Frontend / Rust (kolo.3.app)
+node_modules/
+target/
+.turbo/
+.vite/
+*.tsbuildinfo
+.playwright-data/
+playwright-report/
+test-results/
+kolo.3.app/.playwright-data/
+kolo.3.app/playwright-report/
+kolo.3.app/test-results/
+
+# Logs & System
+*.log
+.DS_Store
+Thumbs.db
+
+# IDE & Editors
+.idea/
+.vscode/
+*.swp
+*.swo

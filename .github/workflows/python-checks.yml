@@ -1,0 +1,33 @@
+name: Python checks
+
+on:
+  push:
+    paths:
+      - "kolo.1.eda/**"
+      - "kolo.2.ml/**"
+      - "kolo_rating_model.py"
+      - "pyproject.toml"
+      - ".flake8"
+      - "scripts/check_python.sh"
+      - ".github/workflows/python-checks.yml"
+  pull_request:
+    paths:
+      - "kolo.1.eda/**"
+      - "kolo.2.ml/**"
+      - "kolo_rating_model.py"
+      - "pyproject.toml"
+      - ".flake8"
+      - "scripts/check_python.sh"
+      - ".github/workflows/python-checks.yml"
+
+jobs:
+  lint-and-type-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install flake8 mypy
+      - run: ./scripts/check_python.sh

@@ -1,0 +1,25 @@
+# Core Machine Learning & Audio
+torch>=2.0.0
+torchaudio>=2.0.0
+scikit-learn>=1.3.0
+umap-learn>=0.5.5
+scipy>=1.11.0
+numpy>=1.24.0
+matplotlib>=3.8.0
+librosa>=0.10.1
+muq @ git+https://github.com/OpenMuQ/MuQ.git
+
+# Audio Ingestion & Scraping
+yt-dlp>=2024.0.0
+mutagen>=1.47.0
+SpotipyFree>=0.1.0
+spotdl>=4.2.0
+
+# Experiment Tracking & Serialization
+mlflow>=2.10.0
+joblib>=1.3.0
+tqdm>=4.66.0
+
+# Code Quality & Typing
+flake8>=7.0.0
+mypy>=1.9.0
