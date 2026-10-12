@@ -3,6 +3,7 @@
 from contextlib import contextmanager
 import os
 from pathlib import Path
+import sys
 from typing import Iterator
 
 
@@ -15,7 +16,7 @@ def store_lock(path: Path) -> Iterator[None]:
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.with_suffix(path.suffix + ".lock").open("a+b") as lock:
-        if os.name == "nt":
+        if sys.platform == "win32":
             import msvcrt
 
             if lock.seek(0, os.SEEK_END) == 0:
@@ -30,7 +31,7 @@ def store_lock(path: Path) -> Iterator[None]:
         try:
             yield
         finally:
-            if os.name == "nt":
+            if sys.platform == "win32":
                 lock.seek(0)
                 msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
             else:
