@@ -182,17 +182,18 @@ export function usePlayer({
   }, [currentId, queueIds]);
 
   const playTrack = useCallback(
-    (track: Track) => {
+    (track: Track, contextTracks?: Track[], contextName?: string) => {
+      const source =
+        contextTracks ??
+        tracksInPlaylist(library?.tracks ?? [], selectedPlaylist);
+      const name = contextName ?? playlistName;
+
       if (track.id === currentId) {
         if (!queueIds.length || queueSource !== selectedPlaylist) {
-          const source = tracksInPlaylist(
-            library?.tracks ?? [],
-            selectedPlaylist,
-          );
           originalQueueIdsRef.current = source.map((item) => item.id);
           setQueueIds(source.map((item) => item.id));
           setQueueSource(selectedPlaylist);
-          setQueueName(playlistName);
+          setQueueName(name);
         }
         const audio = audioRef.current;
         if (!audio) return;
@@ -201,17 +202,11 @@ export function usePlayer({
         return;
       }
 
-      if (queueSource !== selectedPlaylist || !queueIds.includes(track.id)) {
-        const source = tracksInPlaylist(
-          library?.tracks ?? [],
-          selectedPlaylist,
-        );
-        originalQueueIdsRef.current = source.map((item) => item.id);
-        setQueueIds(source.map((item) => item.id));
-        setQueueName(playlistName);
-        setQueueSource(selectedPlaylist);
-        setShuffle(false);
-      }
+      originalQueueIdsRef.current = source.map((item) => item.id);
+      setQueueIds(source.map((item) => item.id));
+      setQueueName(name);
+      setQueueSource(selectedPlaylist);
+      setShuffle(false);
       shouldAutoplayRef.current = true;
       setCurrentId(track.id);
     },
@@ -219,7 +214,7 @@ export function usePlayer({
       currentId,
       library,
       playlistName,
-      queueIds,
+      queueIds.length,
       queueSource,
       selectedPlaylist,
       setCurrentId,

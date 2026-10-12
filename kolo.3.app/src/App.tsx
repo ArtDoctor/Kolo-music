@@ -118,78 +118,23 @@ export default function App() {
     return null;
   }, [selectedPlaylist]);
 
-  const playlist: Playlist | null = useMemo(() => {
-    if (selectedPlaylist === "home")
-      return { id: "home", name: "Home", count: library?.tracks.length ?? 0 };
-    if (selectedPlaylist === "all")
-      return {
-        id: "all",
-        name: activeArtist ? `Artist: ${activeArtist}` : "All Songs",
-        count: library?.tracks.length ?? 0,
-      };
-    if (currentGenreCluster)
-      return {
-        id: selectedPlaylist,
-        name: currentGenreCluster.name,
-        count:
-          library?.tracks.filter((t) => t.cluster === currentGenreCluster.id)
-            .length ?? 0,
-      };
-    if (selectedPlaylist === "rating:all")
-      return {
-        id: "rating:all",
-        name: "Rated songs",
-        count:
-          library?.tracks.filter((t) => t.rating !== null && t.rating > 0)
-            .length ?? 0,
-      };
-    if (selectedPlaylist === "rating:unrated")
-      return {
-        id: "rating:unrated",
-        name: "Non-rated songs",
-        count:
-          library?.tracks.filter(
-            (t) =>
-              t.rating === null &&
-              t.playlistId !== "negative" &&
-              !t.id.startsWith("neg/"),
-          ).length ?? 0,
-      };
-    if (selectedPlaylist === "rating:5")
-      return {
-        id: "rating:5",
-        name: "Five stars",
-        count: library?.tracks.filter((t) => t.rating === 5).length ?? 0,
-      };
-    if (selectedPlaylist === "rating:4.5")
-      return {
-        id: "rating:4.5",
-        name: "4.5 stars & up",
-        count:
-          library?.tracks.filter((t) => (t.rating ?? 0) >= 4.5).length ?? 0,
-      };
-    if (selectedPlaylist === "rating:4")
-      return {
-        id: "rating:4",
-        name: "Four stars & up",
-        count: library?.tracks.filter((t) => (t.rating ?? 0) >= 4).length ?? 0,
-      };
-    if (selectedPlaylist === "rating:3.5")
-      return {
-        id: "rating:3.5",
-        name: "3.5 stars & up",
-        count:
-          library?.tracks.filter((t) => (t.rating ?? 0) >= 3.5).length ?? 0,
-      };
-    return (
-      library?.playlists.find((item) => item.id === selectedPlaylist) ?? null
+  const isSearching = Boolean(query.trim());
+
+  const searchableTracks = useMemo(() => {
+    if (!library) return [];
+    return library.tracks.filter(
+      (track) =>
+        track.playlistId !== "negative" && !track.id.startsWith("neg/"),
     );
-  }, [selectedPlaylist, currentGenreCluster, library, activeArtist]);
+  }, [library]);
 
   const basePlaylistTracks = useMemo(() => {
     if (!library) return [];
+    if (isSearching) {
+      return searchableTracks;
+    }
     return tracksInPlaylist(library.tracks, selectedPlaylist);
-  }, [library, selectedPlaylist]);
+  }, [library, isSearching, searchableTracks, selectedPlaylist]);
 
   const playlistTracks = useMemo(() => {
     if (!library) return [];
@@ -265,6 +210,89 @@ export default function App() {
     sortBy,
     sortOrder,
     library,
+  ]);
+
+  const playlist: Playlist | null = useMemo(() => {
+    if (isSearching) {
+      return {
+        id: "search",
+        name: `Search: "${query.trim()}"`,
+        count: playlistTracks.length,
+      };
+    }
+    if (selectedPlaylist === "home")
+      return { id: "home", name: "Home", count: library?.tracks.length ?? 0 };
+    if (selectedPlaylist === "all")
+      return {
+        id: "all",
+        name: activeArtist ? `Artist: ${activeArtist}` : "All Songs",
+        count: library?.tracks.length ?? 0,
+      };
+    if (currentGenreCluster)
+      return {
+        id: selectedPlaylist,
+        name: currentGenreCluster.name,
+        count:
+          library?.tracks.filter((t) => t.cluster === currentGenreCluster.id)
+            .length ?? 0,
+      };
+    if (selectedPlaylist === "rating:all")
+      return {
+        id: "rating:all",
+        name: "Rated songs",
+        count:
+          library?.tracks.filter((t) => t.rating !== null && t.rating > 0)
+            .length ?? 0,
+      };
+    if (selectedPlaylist === "rating:unrated")
+      return {
+        id: "rating:unrated",
+        name: "Non-rated songs",
+        count:
+          library?.tracks.filter(
+            (t) =>
+              t.rating === null &&
+              t.playlistId !== "negative" &&
+              !t.id.startsWith("neg/"),
+          ).length ?? 0,
+      };
+    if (selectedPlaylist === "rating:5")
+      return {
+        id: "rating:5",
+        name: "Five stars",
+        count: library?.tracks.filter((t) => t.rating === 5).length ?? 0,
+      };
+    if (selectedPlaylist === "rating:4.5")
+      return {
+        id: "rating:4.5",
+        name: "4.5 stars & up",
+        count:
+          library?.tracks.filter((t) => (t.rating ?? 0) >= 4.5).length ?? 0,
+      };
+    if (selectedPlaylist === "rating:4")
+      return {
+        id: "rating:4",
+        name: "Four stars & up",
+        count: library?.tracks.filter((t) => (t.rating ?? 0) >= 4).length ?? 0,
+      };
+    if (selectedPlaylist === "rating:3.5")
+      return {
+        id: "rating:3.5",
+        name: "3.5 stars & up",
+        count:
+          library?.tracks.filter((t) => (t.rating ?? 0) >= 3.5).length ?? 0,
+      };
+    return (
+      library?.playlists.find((item) => item.id === selectedPlaylist) ?? null
+    );
+  }, [
+    isSearching,
+    query,
+    playlistTracks.length,
+    selectedPlaylist,
+    currentGenreCluster,
+    library,
+    activeArtist,
   ]);
 
   const {
@@ -500,7 +528,10 @@ export default function App() {
           query={query}
           profileOpen={profileOpen}
           onHome={() => selectPlaylist({ id: "home", name: "Home" })}
-          onQueryChange={setQuery}
+          onQueryChange={(text) => {
+            setQuery(text);
+            if (text) setSettingsPage(false);
+          }}
           onClearQuery={() => setQuery("")}
           onToggleProfile={() => setProfileOpen((value) => !value)}
           onOpenSettings={() => {
@@ -511,7 +542,54 @@ export default function App() {
         />
 
         <div className="view-scroll" ref={viewScrollRef}>
-          {settingsPage ? (
+          {isSearching ? (
+            <div key="search" className="page playlist-page page-enter">
+              <PlaylistHeader
+                playlist={playlist}
+                onImport={openImport}
+                onShuffle={playPlaylistShuffled}
+                onLink={() => setLinkOpen((value) => !value)}
+              />
+
+              <TrackFilters
+                value={ratingFilter}
+                totalTracks={basePlaylistTracks.length}
+                onChange={setRatingFilter}
+              />
+
+              {activeArtist && (
+                <ArtistBanner
+                  artist={activeArtist}
+                  trackCount={playlistTracks.length}
+                  onPlay={() => {
+                    if (playlistTracks.length) {
+                      startQueue(
+                        playlistTracks,
+                        activeArtist,
+                        playlistTracks[0],
+                        true,
+                      );
+                    }
+                  }}
+                  onClear={() => setActiveArtist(null)}
+                />
+              )}
+
+              <TrackList
+                key={`search:${ratingFilter}:${sortBy}:${sortOrder}:${query}:${activeArtist ?? ""}:${settings.vibeFilter}`}
+                tracks={playlistTracks}
+                currentId={currentId}
+                isPlaying={isPlaying}
+                sortBy={sortBy}
+                sortOrder={sortOrder}
+                onSort={handleColumnSort}
+                onPlay={(track) => playTrack(track, playlistTracks)}
+                onRate={rateTrack}
+                onLike={likeTrack}
+                onSelectArtist={handleSelectArtist}
+              />
+            </div>
+          ) : settingsPage ? (
             <div key="settings" className="page settings-page page-enter">
               <SettingsPage
                 settings={settings}
@@ -570,7 +648,7 @@ export default function App() {
                 }}
                 onSelectPlaylist={(p) => selectPlaylist(p)}
                 onOpenVisualization={() => setVizOpen(true)}
-                onPlayTrack={playTrack}
+                onPlayTrack={(track) => playTrack(track, library.tracks)}
               />
             </div>
           ) : (
@@ -630,7 +708,7 @@ export default function App() {
                 sortBy={sortBy}
                 sortOrder={sortOrder}
                 onSort={handleColumnSort}
-                onPlay={playTrack}
+                onPlay={(track) => playTrack(track, playlistTracks)}
                 onRate={rateTrack}
                 onLike={likeTrack}
                 onSelectArtist={handleSelectArtist}

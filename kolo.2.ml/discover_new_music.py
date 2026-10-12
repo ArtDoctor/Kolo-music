@@ -29,46 +29,25 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-# Curated search seeds; acceptance is based on the downloaded audio score.
+# Curated search seeds based on newly added high-rated genres and artists;
+# acceptance is strictly based on the downloaded audio score from the retrained model.
 CANDIDATES = [
-    ("Muse", "Assassin"),
-    ("The Strokes", "Reptilia"),
-    ("Them Crooked Vultures", "Elephants"),
-    ("Queens of the Stone Age", "Song for the Dead"),
-    ("Bloc Party", "Helicopter"),
-    ("Miles Kane", "Come Closer"),
-    ("The Last Shadow Puppets", "Dracula Teeth"),
-    ("The Last Shadow Puppets", "Pattern"),
-    ("The Hives", "Two-Timing Touch and Broken Bones"),
-    ("Kiasmos", "Jarred"),
-    ("Max Cooper", "Lovesong"),
-    ("David August", "Last Day"),
-    ("Janus Rasmussen", "April"),
-    ("Grandbrothers", "Famara Dust"),
-    ("Kollektiv Turmstrasse", "Schwindelig"),
-    ("DARKSIDE", "Golden Arrow"),
-    ("Moderat", "Bad Kingdom"),
-    ("Apparat", "Goodbye"),
-    ("Bob Moses", "Tearing Me Up"),
-    ("Gidge", "New Light"),
-    ("Portishead", "The Rip"),
-    ("Agnes Obel", "The Curse"),
-    ("The Black Keys", "Howlin' for You"),
-    ("Trentemøller", "Take Me Into Your Skin"),
-    ("Rival Consoles", "Recovery"),
-    ("The Anix", "CRAWL"),
-    ("The Anix", "Your Lies Are Like Fire"),
-    ("I Will Never Be the Same", "Forces"),
-    ("I Will Never Be the Same", "Skyhunter"),
-    ("I Will Never Be the Same", "Fantasy"),
-    ("MISSIO", "I See You"),
-    ("Nouveau Arcade", "Guns & Candy"),
-    ("Nouveau Arcade", "Gaslight"),
-    ("Cyan Kicks", "Gasoline"),
+    ("Battle Tapes", "Belgrade"),
+    ("Battle Tapes", "Weight of the World"),
+    ("Battle Tapes", "Valkyrie"),
+    ("Suoming", "Eletrizante"),
+    ("Unlike Pluto", "Belladonna"),
+    ("Unlike Pluto", "Silver Spoon"),
+    ("Grabbitz", "Here With You Now"),
+    ("Ben Böhmer", "Father Ocean"),
+    ("RÜFÜS DU SOL", "On My Knees"),
+    ("Bob Moses", "Back Down"),
+    ("Dj Samir", "FUNK DE BH"),
+    ("Mind Vortex", "Arc"),
 ]
 
 BLOCKED_TITLE_WORDS = re.compile(
-    r"\b(live|reaction|interview|cover|karaoke|tutorial|full album|sped up|slowed)\b",
+    r"\b(live|reaction|interview|cover|karaoke|tutorial|full album)\b",
     re.I,
 )
 AUDIO_EXTENSIONS = {".mp3", ".m4a", ".wav", ".flac", ".ogg", ".webm", ".aac", ".opus"}
