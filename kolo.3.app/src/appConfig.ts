@@ -58,6 +58,22 @@ export function mapVolume(sliderValue: number): number {
   return Math.max(0, Math.min(1, sliderValue ** 2 * 0.65));
 }
 
+// Matches the +12 dB boost cap in kolo.2.ml/scan_loudness.py.
+const MAX_TRACK_GAIN = 4;
+
+// Element volume for a track: the slider level scaled by the track's loudness
+// gain. Gains above 1 lift quiet tracks using the headroom below full volume.
+export function playbackVolume(
+  settings: PlayerSettings,
+  track: Pick<Track, "gain"> | null,
+): number {
+  const gain =
+    (settings.loudnessLimiter ?? true)
+      ? Math.max(0.05, Math.min(MAX_TRACK_GAIN, track?.gain ?? 1))
+      : 1;
+  return Math.max(0, Math.min(1, mapVolume(settings.volume) * gain));
+}
+
 export function splitArtists(artistString: string): string[] {
   if (!artistString || artistString === "Unknown artist") {
     return [artistString || "Unknown artist"];

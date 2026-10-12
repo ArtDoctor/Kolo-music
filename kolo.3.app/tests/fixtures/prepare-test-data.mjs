@@ -71,4 +71,18 @@ writeFileSync(
   ),
 );
 
+// One quiet and one loud track, with the gains scan_loudness.py derives for
+// a -14 LUFS target.
+writeFileSync(
+  join(root, ".kolo/loudness.json"),
+  JSON.stringify(
+    {
+      "pos/Aurora - Neon Sky.wav": { lufs: -20, gain: 1.995 },
+      "pos/Mira - Quiet Motion.wav": { lufs: -8, gain: 0.501 },
+    },
+    null,
+    2,
+  ),
+);
+
 console.log(`Prepared Playwright music library at ${root}`);

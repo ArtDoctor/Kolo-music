@@ -57,7 +57,7 @@ Contains the cluster definitions and the cluster ID, label, and color assigned t
 
 ### `loudness.json`
 
-Maps track IDs to measured integrated loudness (`lufs`) and a playback `gain`. The scanner only attenuates loud tracks; it does not boost quiet tracks.
+Maps track IDs to measured integrated loudness (`lufs`) and a linear playback `gain` that brings the track to -14 LUFS. Loud tracks get a gain below 1 and quiet tracks a gain above 1, capped at +12 dB. Tracks that could not be measured have no entry.
 
 ### `artwork/`
 

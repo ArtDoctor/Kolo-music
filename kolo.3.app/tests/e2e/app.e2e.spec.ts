@@ -20,6 +20,12 @@ test.afterEach(async ({ request }) => {
   await request.post("/api/likes", {
     data: { trackId: ratedFixtureId, liked: false },
   });
+  const { jobs } = await (await request.get("/api/jobs")).json();
+  for (const job of jobs) {
+    if (job.status === "running" || job.status === "queued")
+      await request.post(`/api/jobs/${job.id}/cancel`);
+  }
+  await request.post("/api/jobs/clear");
 });
 
 test("navigates playlists and searches the selected collection", async ({
@@ -289,6 +295,31 @@ test("restores the chosen volume, supports wheel control, and enlarges range hit
   expect((await progress.boundingBox())!.height).toBeGreaterThanOrEqual(20);
 });
 
+test("loudness normalization boosts quiet tracks and attenuates loud ones", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: /Phone music/ }).click();
+  await page.getByRole("slider", { name: "Volume" }).fill("0.5");
+  const audio = page.locator("audio");
+  const elementVolume = () =>
+    audio.evaluate((element: HTMLAudioElement) => element.volume);
+  const sliderLevel = 0.5 ** 2 * 0.65;
+
+  await page.getByTestId("track-row").filter({ hasText: "Neon Sky" }).click();
+  await expect.poll(elementVolume).toBeCloseTo(sliderLevel * 1.995, 4);
+
+  await page
+    .getByTestId("track-row")
+    .filter({ hasText: "Quiet Motion" })
+    .click();
+  await expect.poll(elementVolume).toBeCloseTo(sliderLevel * 0.501, 4);
+
+  await page.getByRole("button", { name: "Open profile" }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByLabel("Match track loudness (-14 LUFS)").uncheck();
+  await expect.poll(elementVolume).toBeCloseTo(sliderLevel, 4);
+});
+
 test("changing volume during playback does not stop or reload the song", async ({
   page,
 }) => {
@@ -475,34 +506,10 @@ test("imports a browser-selected audio file into the persistent Imported playlis
   await expect(page.getByText("Browser Artist", { exact: true })).toBeVisible();
 });
 
-test("recognizes Spotify playlist link and exposes Spotify download action", async ({
+test("imports a Spotify link in the background and opens the new playlist", async ({
   page,
 }) => {
   await page.getByRole("button", { name: /Phone music/ }).click();
-  await page.route("**/api/spotify", (route) =>
-    route.fulfill({
-      status: 202,
-      contentType: "application/json",
-      body: JSON.stringify({ id: "test-job", status: "starting" }),
-    }),
-  );
-  await page.route("**/api/spotify/status", (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        active: true,
-        playlistName: "Discover Weekly",
-        playlistId: "custom:discover-weekly",
-        downloaded: 1,
-        total: 30,
-        percent: 3.3,
-        currentTrack: "Zeli - Butterflies",
-        status: "downloading",
-      }),
-    }),
-  );
-
   await page.getByRole("button", { name: "Add link or search" }).click();
   await page.getByRole("button", { name: "Discover Weekly" }).click();
 
@@ -510,17 +517,208 @@ test("recognizes Spotify playlist link and exposes Spotify download action", asy
   await expect(input).toHaveValue(
     "https://open.spotify.com/playlist/37i9dQZEVXcOour5t7D6qU",
   );
+  await page.getByRole("button", { name: "Download from Spotify" }).click();
 
-  const spotifyButton = page.getByRole("button", {
-    name: "Download from Spotify",
-  });
-  await expect(spotifyButton).toBeVisible();
-  await spotifyButton.click();
+  // The form is free again while the import runs.
+  await expect(input).toHaveValue("");
+  const card = page.getByTestId("job-card");
+  await expect(card).toHaveAttribute("data-job-kind", "spotify");
+  await expect(card.getByText("Fake Mix", { exact: true })).toBeVisible();
+  await expect(card.getByRole("progressbar")).toBeVisible();
 
-  await expect(page.getByText(/1 of 30/)).toBeVisible();
+  await expect(card).toHaveAttribute("data-job-status", "done");
+  await expect(card.getByText("Added 2 songs · 1 not found")).toBeVisible();
+  await card.getByText("1 not found", { exact: true }).click();
+  await expect(card.getByText("Fake Band - Missing")).toBeVisible();
   await expect(
-    page.getByText("Zeli - Butterflies", { exact: true }),
+    card.getByRole("button", { name: "Retry Fake Mix" }),
   ).toBeVisible();
+
+  // The new playlist shows up without a reload and can be opened from here.
+  await expect(
+    page.getByRole("button", { name: /Fake Mix, 2 songs/ }).first(),
+  ).toBeVisible();
+  await card.getByRole("button", { name: "Open Fake Mix" }).click();
+  await expect(page.getByRole("heading", { name: "Fake Mix" })).toBeVisible();
+  await expect(page.getByTestId("track-row")).toHaveCount(2);
+  await expect(page.getByRole("region", { name: "Activity" })).toHaveCount(0);
+});
+
+test("downloads several pasted links at once and shows each one's progress", async ({
+  page,
+}, testInfo) => {
+  const ids = [`slow-one-${testInfo.retry}`, `slow-two-${testInfo.retry}`];
+  await page.getByRole("button", { name: /Imports, \d+ songs?/ }).click();
+  const input = page.getByRole("textbox", { name: "Import URL or search" });
+  const download = page.locator(".imports-hero .btn-primary");
+  await expect(download).toBeDisabled();
+
+  // A list copied with one link per line arrives as separate links.
+  await input.focus();
+  await page.evaluate(
+    (text) => {
+      const data = new DataTransfer();
+      data.setData("text/plain", text);
+      document.activeElement?.dispatchEvent(
+        new ClipboardEvent("paste", {
+          clipboardData: data,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    },
+    ids.map((id) => `https://www.youtube.com/watch?v=${id}`).join("\n"),
+  );
+  await expect(download).toHaveText("Download 2 links");
+  await download.click();
+  await expect(input).toHaveValue("");
+
+  await page.getByRole("button", { name: /^Activity: / }).click();
+  const panel = page.getByRole("region", { name: "Activity" });
+  const cards = panel.getByTestId("job-card");
+  await expect(cards).toHaveCount(2);
+  await expect(panel.locator('[data-job-status="running"]')).toHaveCount(2);
+  await expect(
+    page.getByRole("button", { name: "Activity: 2 active" }),
+  ).toBeVisible();
+  for (const id of ids) {
+    const card = cards.filter({ hasText: `Fake Artist - ${id}` });
+    await expect(card.getByText("YouTube → Imports")).toBeVisible();
+    await expect(
+      card.getByText(/Downloading · [\d.]+ of 3\.8 MB/),
+    ).toBeVisible();
+    await expect(card.getByText(/^\d+%$/)).toBeVisible();
+    await expect(card.getByRole("progressbar")).toHaveAttribute(
+      "aria-valuenow",
+      /^\d+$/,
+    );
+  }
+
+  // Progress stays reachable from any page while the downloads continue.
+  await page.getByRole("button", { name: "Close activity" }).click();
+  await page.getByRole("button", { name: /Phone music/ }).click();
+  await expect(panel).toHaveCount(0);
+  await page.getByRole("button", { name: /^Activity: / }).click();
+  await expect(cards).toHaveCount(2);
+
+  await expect(panel.locator('[data-job-status="done"]')).toHaveCount(2);
+  await expect(panel.getByText("Added to Imports")).toHaveCount(2);
+  await expect(
+    page.getByRole("button", { name: "Activity: Done" }),
+  ).toBeVisible();
+
+  // The finished songs are in the playlist without reloading the page.
+  await cards.first().getByRole("button", { name: "Open Imports" }).click();
+  for (const id of ids) {
+    await expect(
+      page.getByTestId("track-row").getByText(id, { exact: true }),
+    ).toBeVisible();
+  }
+});
+
+test("cancels, retries, and dismisses downloads from the activity panel", async ({
+  page,
+}, testInfo) => {
+  const slowId = `slow-cancel-${testInfo.retry}`;
+  await page.getByRole("button", { name: /Imports, \d+ songs?/ }).click();
+  const input = page.getByRole("textbox", { name: "Import URL or search" });
+  const panel = page.getByRole("region", { name: "Activity" });
+
+  await input.fill(`https://www.youtube.com/watch?v=${slowId}`);
+  await input.press("Enter");
+  await page.getByRole("button", { name: /^Activity: / }).click();
+  const slow = panel.getByTestId("job-card").filter({ hasText: slowId });
+  await expect(slow).toHaveAttribute("data-job-status", "running");
+  await slow.getByRole("button", { name: /^Cancel / }).click();
+  await expect(slow).toHaveAttribute("data-job-status", "cancelled");
+  await expect(slow.getByText("Cancelled", { exact: true })).toBeVisible();
+  await expect(slow.getByRole("progressbar")).toHaveCount(0);
+
+  await input.fill("https://www.youtube.com/watch?v=fail-e2e");
+  await page
+    .getByRole("button", { name: "Download YouTube Audio", exact: true })
+    .click();
+  const failed = panel.getByTestId("job-card").filter({ hasText: "fail-e2e" });
+  await expect(failed).toHaveAttribute("data-job-status", "error");
+  await expect(
+    failed.getByText("[youtube] fail-e2e: Video unavailable"),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Activity: 1 failed" }),
+  ).toBeVisible();
+  await failed.getByRole("button", { name: /^Dismiss / }).click();
+  await expect(failed).toHaveCount(0);
+
+  // Retrying the cancelled download starts it again from the same link.
+  await slow.getByRole("button", { name: /^Retry / }).click();
+  await expect(slow).toHaveAttribute("data-job-status", "running");
+  await expect(slow).toHaveAttribute("data-job-status", "done");
+  await panel.getByRole("button", { name: "Clear finished" }).click();
+  await expect(page.getByRole("button", { name: /^Activity: / })).toHaveCount(
+    0,
+  );
+  await expect(
+    page.getByTestId("track-row").getByText(slowId, { exact: true }),
+  ).toBeVisible();
+});
+
+test("rates the unrated songs of a playlist from its header button", async ({
+  page,
+  request,
+}, testInfo) => {
+  const name = `Fresh Finds ${testInfo.retry}`;
+  const playlist = (await (
+    await request.post("/api/playlists", { data: { name } })
+  ).json()) as { id: string };
+  for (const title of ["First", "Second", "Unreadable"]) {
+    await request.post(
+      `/api/import?name=${encodeURIComponent(`New Artist - ${title}.wav`)}&playlistId=${encodeURIComponent(playlist.id)}`,
+      { data: createTestWav() },
+    );
+  }
+  await page.reload();
+
+  // Fully rated playlists do not offer the action.
+  await page.getByRole("button", { name: /Phone music/ }).click();
+  await expect(
+    page.getByTestId("track-row").filter({ hasText: "Quiet Motion" }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: new RegExp(`${name}, 3 songs`) })
+    .click();
+  const rateButton = page.getByRole("button", { name: "Rate 3 unrated" });
+  await expect(rateButton).toBeVisible();
+  const stars = (title: string) =>
+    page
+      .getByTestId("track-row")
+      .filter({ hasText: title })
+      .getByTestId("star-rating");
+  await expect(stars("First")).not.toHaveClass(/has-ai-prediction/);
+
+  await rateButton.click();
+  await expect(page.getByRole("button", { name: /^Rating/ })).toBeDisabled();
+  await page.getByRole("button", { name: /^Activity: / }).click();
+  const card = page.getByTestId("job-card");
+  await expect(card).toHaveAttribute("data-job-kind", "rating");
+  await expect(card.getByText(`Rating model → ${name}`)).toBeVisible();
+  await expect(card.getByText("Loading the audio model…")).toBeVisible();
+
+  // Estimates appear in the list as they are produced.
+  await expect(stars("First")).toHaveAttribute("data-ai-rating", "4");
+  await expect(stars("Second")).toHaveAttribute("data-ai-rating", "4");
+  await expect(card).toHaveAttribute("data-job-status", "done");
+  await expect(
+    card.getByText("Rated 2 songs · 1 could not be read"),
+  ).toBeVisible();
+  await card.getByText("1 could not be read", { exact: true }).click();
+  await expect(card.getByText("New Artist - Unreadable")).toBeVisible();
+
+  // What could not be rated is still offered; a personal rating is kept.
+  await expect(
+    page.getByRole("button", { name: "Rate 1 unrated" }),
+  ).toBeVisible();
+  await expect(stars("Unreadable")).toHaveAttribute("data-ai-rating", "");
+  await expect(stars("First")).toHaveAttribute("data-rating", "");
 });
 
 test("supports 3.5+ stars filter card and toolbar chip", async ({ page }) => {

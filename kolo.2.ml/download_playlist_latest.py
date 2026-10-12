@@ -7,6 +7,8 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
+import signal
 import sys
 import threading
 import uuid
@@ -94,8 +96,11 @@ def tag_clean_metadata(file_path: str, title: str, artist: str):
         pass
 
 
-def download_track(track_info: dict, output_dir: str, bitrate: str = "320") -> bool:
-    """Download a single track using yt-dlp, extract MP3, and embed cover artwork."""
+def download_track(track_info: dict, output_dir: str, bitrate: str = "320", staging_dir: str | None = None) -> bool:
+    """Download a single track using yt-dlp, extract MP3, and embed cover artwork.
+
+    Partial files are kept in ``staging_dir`` so the player never lists them.
+    """
     title = track_info["name"]
     artists = ", ".join(a["name"] for a in track_info.get("artists", []))
 
@@ -106,7 +111,7 @@ def download_track(track_info: dict, output_dir: str, bitrate: str = "320") -> b
         return True
 
     unique_id = uuid.uuid4().hex[:8]
-    tmp_out = os.path.join(output_dir, f"tmp_{unique_id}_{sanitize_filename(title)[:30]}")
+    tmp_out = os.path.join(staging_dir or output_dir, f"tmp_{unique_id}_{sanitize_filename(title)[:30]}")
 
     ydl_opts = {
         "format": "bestaudio/best",
@@ -158,7 +163,7 @@ def download_track(track_info: dict, output_dir: str, bitrate: str = "320") -> b
 
                 if os.path.exists(downloaded_mp3):
                     tag_clean_metadata(downloaded_mp3, title, artists)
-                    os.rename(downloaded_mp3, target_path)
+                    shutil.move(downloaded_mp3, target_path)
 
                     # Cache artwork into .kolo/artwork if present
                     try:
@@ -199,6 +204,9 @@ def download_track(track_info: dict, output_dir: str, bitrate: str = "320") -> b
 
 
 def resolve_data_root() -> Path:
+    override = os.environ.get("KOLO_DATA_DIR")
+    if override:
+        return Path(override)
     script_dir = Path(__file__).resolve().parent
     repo_dir = script_dir.parent
     candidate = repo_dir / "kolo.0.data"
@@ -289,7 +297,14 @@ def main():
 
     data_root = resolve_data_root()
 
-    fetched_title, tracks, kind = fetch_spotify_info(args.url)
+    try:
+        fetched_title, tracks, kind = fetch_spotify_info(args.url)
+    except Exception as error:
+        if not args.json:
+            raise
+        print(f"Spotify lookup failed: {error!r}", file=sys.stderr)
+        emit_json({"type": "error", "error": "Could not read that Spotify link. Check that it is public."})
+        sys.exit(1)
     display_name = args.playlist_name or fetched_title or "Spotify Playlist"
 
     target_dir, resolved_id, resolved_name = resolve_destination(
@@ -332,6 +347,7 @@ def main():
     if args.json:
         emit_json({
             "type": "init",
+            "title": fetched_title,
             "playlistName": resolved_name,
             "playlistId": resolved_id,
             "targetDir": str(target_dir),
@@ -367,13 +383,27 @@ def main():
     total_needed = len(to_download)
     counter_lock = threading.Lock()
 
+    staging_dir = data_root / ".kolo" / "tmp" / f"spotify-{os.getpid()}"
+    staging_dir.mkdir(parents=True, exist_ok=True)
+
+    def stop(signum, _frame):
+        # Worker threads cannot be interrupted, so leave without waiting for them.
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        os._exit(128 + signum)
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+
     def process_item(item_idx, track_item):
         nonlocal success_count, fail_count
         title = track_item.get("name", "")
         artists = ", ".join(a["name"] for a in track_item.get("artists", []))
         track_str = f"{artists} - {title}"
 
-        ok = download_track(track_item, str(target_dir), args.bitrate)
+        if args.json:
+            with counter_lock:
+                emit_json({"type": "start", "track": track_str})
+        ok = download_track(track_item, str(target_dir), args.bitrate, str(staging_dir))
         with counter_lock:
             if ok:
                 success_count += 1
@@ -398,10 +428,13 @@ def main():
                 print(f"[{curr}/{total_needed}] ({pct:.1f}%) {status} {track_str}", flush=True)
         return ok
 
-    with ThreadPoolExecutor(max_workers=args.workers) as executor:
-        futures = [executor.submit(process_item, index, track) for index, track in enumerate(to_download, 1)]
-        for future in as_completed(futures):
-            future.result()
+    try:
+        with ThreadPoolExecutor(max_workers=args.workers) as executor:
+            futures = [executor.submit(process_item, index, track) for index, track in enumerate(to_download, 1)]
+            for future in as_completed(futures):
+                future.result()
+    finally:
+        shutil.rmtree(staging_dir, ignore_errors=True)
 
     if args.json:
         emit_json({

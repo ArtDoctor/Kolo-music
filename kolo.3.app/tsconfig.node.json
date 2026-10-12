@@ -9,5 +9,10 @@
     "noEmit": true,
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo"
   },
-  "include": ["vite.config.ts", "viteLibraryPlugin.ts"]
+  "include": [
+    "vite.config.ts",
+    "viteLibraryPlugin.ts",
+    "viteJobs.ts",
+    "src/types.ts"
+  ]
 }

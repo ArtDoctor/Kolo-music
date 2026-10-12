@@ -10,6 +10,7 @@ import {
   type SortByType,
   type SortOrderType,
 } from "./appConfig";
+import { Activity, Downloads, type JobActions } from "./components/Activity";
 import { HomePage } from "./components/HomePage";
 import { ImportControls } from "./components/ImportControls";
 import { Sidebar, TopBar } from "./components/Navigation";
@@ -19,9 +20,11 @@ import { SettingsPage } from "./components/SettingsPage";
 import { PlaylistHeader, TrackList } from "./components/TrackList";
 import { ArtistBanner, TrackFilters } from "./components/TrackToolbar";
 import { useImports } from "./hooks/useImports";
+import { useJobs } from "./hooks/useJobs";
 import { useLibrary } from "./hooks/useLibrary";
 import { useLocalStorage } from "./hooks/useLocalStorage";
 import { usePlayer } from "./hooks/usePlayer";
+import { isActiveJob } from "./jobs";
 import { searchTrackOnYouTube } from "./library";
 import type { PlayerSettings, Playlist, Track } from "./types";
 
@@ -60,17 +63,25 @@ export default function App() {
 
   const viewScrollRef = useRef<HTMLDivElement>(null);
   const {
+    jobs,
+    activityOpen,
+    setActivityOpen,
+    download: startDownloads,
+    rate: startRating,
+    cancel: cancelJob,
+    retry: retryJob,
+    dismiss: dismissJob,
+    clearFinished: clearFinishedJobs,
+  } = useJobs({ refreshLibrary, setNotice });
+  const {
     linkOpen,
     setLinkOpen,
     linkInput,
     setLinkInput,
-    downloading,
-    spotifyStatus,
     fileInputRef,
     createNewPlaylist,
     handleLink,
-    downloadSpotifyLink,
-    downloadLink,
+    downloadLinks,
     beginImport,
     openImport,
   } = useImports({
@@ -80,6 +91,7 @@ export default function App() {
     setSettingsPage,
     setNotice,
     refreshLibrary,
+    startDownloads,
   });
 
   useEffect(() => {
@@ -295,6 +307,21 @@ export default function App() {
     activeArtist,
   ]);
 
+  // "Unrated" means no stars of any kind: neither the user's nor the model's.
+  const unratedIds = useMemo(
+    () =>
+      basePlaylistTracks
+        .filter((track) => track.rating === null && track.aiRating == null)
+        .map((track) => track.id),
+    [basePlaylistTracks],
+  );
+  const ratingJob = jobs.find(
+    (job) =>
+      job.kind === "rating" &&
+      isActiveJob(job) &&
+      job.playlistId === selectedPlaylist,
+  );
+
   const {
     audioRef,
     currentTrack,
@@ -430,6 +457,15 @@ export default function App() {
     [sortBy],
   );
 
+  function rateUnrated() {
+    if (!unratedIds.length) return;
+    void startRating({
+      trackIds: unratedIds,
+      playlistId: selectedPlaylist,
+      playlistName: playlist?.name ?? "Playlist",
+    });
+  }
+
   function playPlaylistShuffled() {
     if (!playlistTracks.length) return;
     startQueue(
@@ -484,6 +520,17 @@ export default function App() {
     );
   }
 
+  const jobActions: JobActions = {
+    onCancel: (id) => void cancelJob(id),
+    onRetry: (id) => void retryJob(id),
+    onDismiss: (id) => void dismissJob(id),
+    onClearFinished: () => void clearFinishedJobs(),
+    onOpenPlaylist: (id) => {
+      selectPlaylist({ id });
+      setActivityOpen(false);
+    },
+  };
+
   const visiblePlaylists = library.playlists.filter((p) => p.id !== "negative");
   const negativePlaylist = library.playlists.find((p) => p.id === "negative");
 
@@ -527,6 +574,15 @@ export default function App() {
           settingsPage={settingsPage}
           query={query}
           profileOpen={profileOpen}
+          activity={
+            <Activity
+              jobs={jobs}
+              currentPlaylistId={selectedPlaylist}
+              open={activityOpen}
+              onToggle={() => setActivityOpen((value) => !value)}
+              {...jobActions}
+            />
+          }
           onHome={() => selectPlaylist({ id: "home", name: "Home" })}
           onQueryChange={(text) => {
             setQuery(text);
@@ -658,21 +714,28 @@ export default function App() {
             >
               <PlaylistHeader
                 playlist={playlist}
+                unratedCount={unratedIds.length}
+                ratingJob={ratingJob}
                 onImport={openImport}
                 onShuffle={playPlaylistShuffled}
                 onLink={() => setLinkOpen((value) => !value)}
+                onRateUnrated={rateUnrated}
               />
 
               <ImportControls
                 selectedPlaylist={selectedPlaylist}
                 linkOpen={linkOpen}
                 linkInput={linkInput}
-                downloading={downloading}
-                spotifyStatus={spotifyStatus}
+                downloads={
+                  <Downloads
+                    jobs={jobs.filter((job) => job.kind !== "rating")}
+                    currentPlaylistId={selectedPlaylist}
+                    {...jobActions}
+                  />
+                }
                 onLinkInput={setLinkInput}
                 onOpenLink={() => void handleLink()}
-                onSpotifyDownload={() => void downloadSpotifyLink()}
-                onYouTubeDownload={() => void downloadLink()}
+                onDownload={() => void downloadLinks()}
                 onImportLocal={openImport}
               />
 

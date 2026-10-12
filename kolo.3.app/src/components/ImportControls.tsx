@@ -1,9 +1,6 @@
 import { Download, ExternalLink, Upload } from "lucide-react";
-import {
-  isSpotifyLink,
-  isYouTubeLink,
-  type SpotifyDownloadStatus,
-} from "../library";
+import type { ClipboardEvent, ReactNode } from "react";
+import { isSpotifyLink, parseDownloadLinks } from "../library";
 
 const DISCOVER_WEEKLY_URL =
   "https://open.spotify.com/playlist/37i9dQZEVXcOour5t7D6qU";
@@ -12,57 +9,44 @@ interface ImportControlsProps {
   selectedPlaylist: string;
   linkOpen: boolean;
   linkInput: string;
-  downloading: boolean;
-  spotifyStatus: SpotifyDownloadStatus | null;
+  // The running and finished downloads, shown under the link box.
+  downloads?: ReactNode;
   onLinkInput: (value: string) => void;
   onOpenLink: () => void;
-  onSpotifyDownload: () => void;
-  onYouTubeDownload: () => void;
+  onDownload: () => void;
   onImportLocal: () => void;
-}
-
-function SpotifyProgress({ status }: { status: SpotifyDownloadStatus }) {
-  return (
-    <div className="spotify-progress-card">
-      <div className="spotify-progress-header">
-        <strong>{status.playlistName || "Spotify Playlist"}</strong>
-        <span>
-          {status.downloaded ?? 0} of {status.total ?? 0} (
-          {Math.round(status.percent ?? 0)}%)
-        </span>
-      </div>
-      <div className="spotify-progress-track">
-        <div
-          className="spotify-progress-fill"
-          style={{ width: `${Math.max(status.percent ?? 0, 5)}%` }}
-        />
-      </div>
-      <small className="spotify-progress-song">
-        {status.currentTrack || "Preparing download..."}
-      </small>
-    </div>
-  );
 }
 
 export function ImportControls({
   selectedPlaylist,
   linkOpen,
   linkInput,
-  downloading,
-  spotifyStatus,
+  downloads,
   onLinkInput,
   onOpenLink,
-  onSpotifyDownload,
-  onYouTubeDownload,
+  onDownload,
   onImportLocal,
 }: ImportControlsProps) {
-  const spotifyLink = isSpotifyLink(linkInput);
-  const youtubeLink = isYouTubeLink(linkInput);
+  const links = parseDownloadLinks(linkInput);
+  const spotifyOnly = links.length === 1 && isSpotifyLink(links[0]);
 
   function submitInput() {
-    if (spotifyLink) onSpotifyDownload();
-    else if (youtubeLink) onYouTubeDownload();
+    if (links.length) onDownload();
     else onOpenLink();
+  }
+
+  // A text field drops line breaks, which would glue a pasted list of links
+  // into one unusable string.
+  function pasteLinks(event: ClipboardEvent<HTMLInputElement>) {
+    const text = event.clipboardData.getData("text");
+    if (!/[\r\n]/.test(text)) return;
+    event.preventDefault();
+    onLinkInput(`${linkInput} ${text}`.split(/\s+/).filter(Boolean).join(" "));
+  }
+
+  function downloadLabel(youtubeLabel: string) {
+    if (links.length > 1) return `Download ${links.length} links`;
+    return spotifyOnly ? "Download from Spotify" : youtubeLabel;
   }
 
   if (selectedPlaylist === "imported") {
@@ -77,32 +61,25 @@ export function ImportControls({
             className="imports-hero-input"
             value={linkInput}
             onChange={(event) => onLinkInput(event.target.value)}
-            placeholder="Paste a YouTube video URL, Spotify link, or song name..."
+            onPaste={pasteLinks}
+            placeholder="Paste YouTube or Spotify links, or a song name..."
             aria-label="Import URL or search"
             onKeyDown={(event) => {
               if (event.key === "Enter") submitInput();
             }}
           />
-          {spotifyLink ? (
-            <button
-              className="btn-primary"
-              disabled={downloading}
-              onClick={onSpotifyDownload}
-            >
-              <Download size={16} />
-              {downloading ? "Importing Spotify…" : "Download from Spotify"}
-            </button>
-          ) : (
-            <button
-              className="btn-primary"
-              disabled={downloading || !youtubeLink}
-              onClick={onYouTubeDownload}
-            >
-              <Download size={16} />
-              {downloading ? "Downloading…" : "Download YouTube Audio"}
-            </button>
-          )}
+          <button
+            className="btn-primary"
+            disabled={!links.length}
+            onClick={onDownload}
+          >
+            <Download size={16} />
+            {downloadLabel("Download YouTube Audio")}
+          </button>
         </div>
+        <small className="imports-hero-hint">
+          Paste several links at once. Downloads keep running while you browse.
+        </small>
         <div className="imports-hero-actions">
           <button className="btn-secondary" onClick={onImportLocal}>
             <Upload size={16} /> Choose Local Audio Files
@@ -114,7 +91,7 @@ export function ImportControls({
             Load Discover Weekly URL
           </button>
         </div>
-        {spotifyStatus?.active && <SpotifyProgress status={spotifyStatus} />}
+        {downloads}
       </div>
     );
   }
@@ -127,7 +104,8 @@ export function ImportControls({
         <input
           value={linkInput}
           onChange={(event) => onLinkInput(event.target.value)}
-          placeholder="YouTube/Spotify link or song to search"
+          onPaste={pasteLinks}
+          placeholder="YouTube/Spotify links or song to search"
           aria-label="Music link or search"
           onKeyDown={(event) => {
             if (event.key === "Enter") submitInput();
@@ -136,26 +114,19 @@ export function ImportControls({
         <button onClick={onOpenLink}>
           <ExternalLink size={16} /> Open / search
         </button>
-        {spotifyLink ? (
-          <button
-            disabled={downloading}
-            onClick={onSpotifyDownload}
-            title="Download all songs from this Spotify playlist or album into Kolo"
-            className="spotify-download-button"
-          >
-            <Download size={16} />
-            {downloading ? "Importing Spotify…" : "Download from Spotify"}
-          </button>
-        ) : (
-          <button
-            disabled={downloading || !youtubeLink}
-            onClick={onYouTubeDownload}
-            title="Paste an HTTPS YouTube video link to download"
-          >
-            <Download size={16} />
-            {downloading ? "Downloading…" : "Download YouTube"}
-          </button>
-        )}
+        <button
+          disabled={!links.length}
+          onClick={onDownload}
+          title={
+            spotifyOnly
+              ? "Download all songs from this Spotify playlist or album into Kolo"
+              : "Paste HTTPS YouTube or Spotify links to download"
+          }
+          className={spotifyOnly ? "spotify-download-button" : undefined}
+        >
+          <Download size={16} />
+          {downloadLabel("Download YouTube")}
+        </button>
       </div>
       <div className="link-suggestions">
         <span>Quick import:</span>
@@ -167,7 +138,7 @@ export function ImportControls({
           Discover Weekly
         </button>
       </div>
-      {spotifyStatus?.active && <SpotifyProgress status={spotifyStatus} />}
+      {downloads}
     </div>
   );
 }

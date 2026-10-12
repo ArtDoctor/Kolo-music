@@ -17,20 +17,28 @@ import {
   type SortByType,
   type SortOrderType,
 } from "../appConfig";
-import type { Playlist, Track } from "../types";
+import type { Job, Playlist, Track } from "../types";
 import { Artwork } from "./Artwork";
 import { StarRating } from "./StarRating";
 
 export function PlaylistHeader({
   playlist,
+  unratedCount = 0,
+  ratingJob,
   onImport,
   onShuffle,
   onLink,
+  onRateUnrated,
 }: {
   playlist: Playlist | null;
+  // Songs here with neither a personal rating nor a model estimate.
+  unratedCount?: number;
+  // The rating run that is working through this playlist, if any.
+  ratingJob?: Job;
   onImport: () => void;
   onShuffle: () => void;
   onLink: () => void;
+  onRateUnrated?: () => void;
 }) {
   const Icon = playlist ? playlistIcon(playlist.id) : Music2;
   return (
@@ -49,6 +57,18 @@ export function PlaylistHeader({
         <button onClick={onImport}>
           <Upload /> Import songs
         </button>
+        {onRateUnrated && (ratingJob || unratedCount > 0) && (
+          <button
+            onClick={onRateUnrated}
+            disabled={Boolean(ratingJob)}
+            title="Estimate stars for the songs here that have no rating yet, using your rating model"
+          >
+            <Sparkles />{" "}
+            {ratingJob
+              ? `Rating ${ratingJob.completed + ratingJob.failed} of ${ratingJob.total}…`
+              : `Rate ${unratedCount} unrated`}
+          </button>
+        )}
         <button onClick={onLink} aria-label="Add link or search">
           <Link2 />
         </button>

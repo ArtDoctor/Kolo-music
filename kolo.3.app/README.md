@@ -11,7 +11,7 @@ The player is a React 19 and Vite application with an optional Tauri 2 shell. It
 - rating and model-score filters
 - custom playlists and local file import
 - YouTube URL download and Spotify metadata import through local helper processes
-- optional loudness attenuation from precomputed EBU R128 measurements
+- optional loudness normalization from precomputed EBU R128 measurements
 - embedded 3D t-SNE/UMAP library visualization
 - persisted player and interface settings
 

@@ -2,8 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     env, fs,
+    io::Write,
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
 };
 
 const AUDIO_EXTENSIONS: &[&str] = &["mp3", "m4a", "flac", "wav", "ogg", "aac", "opus", "webm"];
@@ -59,6 +60,23 @@ fn data_root() -> PathBuf {
         .and_then(Path::parent)
         .expect("src-tauri must be inside the Kolo repository")
         .join("kolo.0.data")
+}
+
+fn repo_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+}
+
+fn python_binary() -> String {
+    let default_python = repo_dir().join(".venv").join("bin").join("python");
+    env::var("KOLO_PYTHON").unwrap_or_else(|_| {
+        if default_python.exists() {
+            default_python.to_string_lossy().to_string()
+        } else {
+            "python3".into()
+        }
+    })
 }
 
 fn state_dir(root: &Path) -> PathBuf {
@@ -488,22 +506,11 @@ async fn download_spotify(
     }
     tauri::async_runtime::spawn_blocking(move || {
         let root = data_root();
-        let repo_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("..");
-        let default_python = repo_dir.join(".venv").join("bin").join("python");
-        let python = env::var("KOLO_PYTHON").unwrap_or_else(|_| {
-            if default_python.exists() {
-                default_python.to_string_lossy().to_string()
-            } else {
-                "python3".into()
-            }
-        });
-        let script = repo_dir
+        let script = repo_dir()
             .join("kolo.2.ml")
             .join("download_playlist_latest.py");
 
-        let mut cmd = Command::new(python);
+        let mut cmd = Command::new(python_binary());
         cmd.arg(script)
             .arg("--url")
             .arg(&url)
@@ -536,6 +543,51 @@ async fn download_spotify(
     .map_err(|e| e.to_string())?
 }
 
+// Estimates ratings for the given tracks and returns the helper's closing
+// progress event. The helper embeds audio, so this can run for minutes.
+#[tauri::command]
+async fn rate_tracks(track_ids: Vec<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let ids = serde_json::to_string(&track_ids).map_err(|e| e.to_string())?;
+        let mut child = Command::new(python_binary())
+            .arg(repo_dir().join("kolo.2.ml").join("rate_tracks.py"))
+            .arg("--data-root")
+            .arg(data_root())
+            .arg("--ids-stdin")
+            .arg("--json")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        child
+            .stdin
+            .take()
+            .ok_or("Could not send the track list to the rating helper")?
+            .write_all(ids.as_bytes())
+            .map_err(|e| e.to_string())?;
+
+        let output = child.wait_with_output().map_err(|e| e.to_string())?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let last_event = stdout.lines().last().unwrap_or("").to_string();
+        if output.status.success() {
+            return Ok(last_event);
+        }
+        // A failed run ends with an event that says why.
+        let reported = serde_json::from_str::<serde_json::Value>(&last_event)
+            .ok()
+            .and_then(|event| event.get("error")?.as_str().map(str::to_string));
+        Err(reported.unwrap_or_else(|| {
+            String::from_utf8_lossy(&output.stderr)
+                .chars()
+                .take(600)
+                .collect()
+        }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -548,7 +600,8 @@ pub fn run() {
             set_track_liked,
             create_playlist,
             download_youtube,
-            download_spotify
+            download_spotify,
+            rate_tracks
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Kolo");

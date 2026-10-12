@@ -7,7 +7,7 @@ import {
   type Dispatch,
   type SetStateAction,
 } from "react";
-import { mapVolume, tracksInPlaylist } from "../appConfig";
+import { playbackVolume, tracksInPlaylist } from "../appConfig";
 import type {
   LibrarySnapshot,
   PlayerSettings,
@@ -67,11 +67,7 @@ export function usePlayer({
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
-    const gain =
-      (settings.loudnessLimiter ?? true)
-        ? Math.max(0.05, Math.min(1, currentTrack?.gain ?? 1))
-        : 1;
-    audio.volume = Math.max(0, Math.min(1, mapVolume(settings.volume) * gain));
+    audio.volume = playbackVolume(settings, currentTrack);
     if (settings.volume > 0) lastVolumeRef.current = settings.volume;
   }, [currentTrack?.gain, settings.loudnessLimiter, settings.volume]);
 
@@ -83,11 +79,7 @@ export function usePlayer({
     if (!audio.paused) audio.pause();
 
     audio.src = currentTrack.audioUrl;
-    const gain =
-      (settings.loudnessLimiter ?? true)
-        ? Math.max(0.05, Math.min(1, currentTrack.gain ?? 1))
-        : 1;
-    audio.volume = Math.max(0, Math.min(1, mapVolume(settings.volume) * gain));
+    audio.volume = playbackVolume(settings, currentTrack);
 
     if (shouldAutoplayRef.current) {
       void audio

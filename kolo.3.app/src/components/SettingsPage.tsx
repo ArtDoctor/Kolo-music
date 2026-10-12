@@ -54,11 +54,11 @@ export function SettingsPage({
 
       <section>
         <div>
-          <h2>Smart loudness limiter</h2>
+          <h2>Loudness normalization</h2>
           <p>
-            Restrains blasting, overly loud tracks from YouTube with a dynamic
-            peak limiter while keeping quiet acoustic or lo-fi tracks at their
-            natural volume.
+            Plays every track at about the same loudness. Loud masters are
+            turned down and quiet tracks are turned up, whatever source they
+            came from.
           </p>
         </div>
         <label
@@ -77,7 +77,7 @@ export function SettingsPage({
               onChange({ ...settings, loudnessLimiter: e.target.checked })
             }
           />
-          <span>Enable peak limiter ceiling (-14 dBFS)</span>
+          <span>Match track loudness (-14 LUFS)</span>
         </label>
       </section>
 

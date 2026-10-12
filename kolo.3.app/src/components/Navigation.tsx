@@ -11,6 +11,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import { playlistIcon } from "../appConfig";
 import type { Playlist } from "../types";
 
@@ -132,6 +133,7 @@ interface TopBarProps {
   settingsPage: boolean;
   query: string;
   profileOpen: boolean;
+  activity?: ReactNode;
   onHome: () => void;
   onQueryChange: (value: string) => void;
   onClearQuery: () => void;
@@ -144,6 +146,7 @@ export function TopBar({
   settingsPage,
   query,
   profileOpen,
+  activity,
   onHome,
   onQueryChange,
   onClearQuery,
@@ -178,6 +181,7 @@ export function TopBar({
       </label>
 
       <div className="topbar-actions">
+        {activity}
         <div className="profile-wrap">
           <button
             className="avatar"

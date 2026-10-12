@@ -10,9 +10,21 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import type { Plugin } from "vite";
+import {
+  cancelJob,
+  clearFinishedJobs,
+  dismissJob,
+  listJobs,
+  retryJob,
+  spotifyUrl,
+  startRating,
+  startSpotifyImport,
+  startYoutubeDownload,
+  triggerLoudnessScan,
+  youtubeUrl,
+} from "./viteJobs";
 
 const AUDIO_EXTENSIONS = new Set([
   ".mp3",
@@ -112,244 +124,35 @@ function playlistFolder(root: string, playlistId: string) {
   return folder;
 }
 
-function youtubeUrl(value: string) {
+function playlistLabel(root: string, playlistId: string) {
+  const label = playlistDefinitions(root).find(
+    ([id]) => id === playlistId,
+  )?.[1];
+  if (!label) throw new Error("Unknown playlist");
+  if (!playlistId.startsWith("custom:")) return label;
   try {
-    const url = new URL(value);
-    return (
-      url.protocol === "https:" &&
-      [
-        "youtube.com",
-        "www.youtube.com",
-        "music.youtube.com",
-        "youtu.be",
-        "www.youtu.be",
-      ].includes(url.hostname)
-    );
+    const names = JSON.parse(
+      readFileSync(join(root, ".kolo", "playlists.json"), "utf8"),
+    ) as Record<string, string>;
+    return names[playlistId.slice(7)] ?? label;
   } catch {
-    return false;
+    return label;
   }
 }
 
-function spotifyUrl(value: string) {
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && url.hostname === "open.spotify.com";
-  } catch {
-    return false;
-  }
+function isLibraryAudio(root: string, trackId: string) {
+  const filePath = resolve(root, trackId);
+  return (
+    filePath.startsWith(`${root}${sep}`) &&
+    AUDIO_EXTENSIONS.has(extname(filePath).toLowerCase()) &&
+    existsSync(filePath)
+  );
 }
 
-interface SpotifyJob {
-  id: string;
-  url: string;
-  playlistId: string;
-  playlistName: string;
-  targetDir: string;
-  total: number;
-  downloaded: number;
-  existing: number;
-  failed: number;
-  currentTrack: string;
-  percent: number;
-  status: "starting" | "downloading" | "done" | "error";
-  error?: string;
-}
-
-let activeSpotifyJob: SpotifyJob | null = null;
-
-function startSpotifyDownload(
-  root: string,
-  url: string,
-  playlistId?: string,
-  playlistName?: string,
-  createPlaylist?: boolean,
-): SpotifyJob {
-  if (!spotifyUrl(url))
-    throw new Error("Only HTTPS open.spotify.com links can be imported");
-
-  const pythonCandidate = resolve(
-    import.meta.dirname,
-    "..",
-    ".venv",
-    "bin",
-    "python",
-  );
-  const pythonBinary = existsSync(pythonCandidate)
-    ? pythonCandidate
-    : (process.env.KOLO_PYTHON ?? "python3");
-  const scriptPath = resolve(
-    import.meta.dirname,
-    "..",
-    "kolo.2.ml",
-    "download_playlist_latest.py",
-  );
-
-  const jobId = randomUUID();
-  const job: SpotifyJob = {
-    id: jobId,
-    url,
-    playlistId: playlistId ?? "custom:discover-weekly",
-    playlistName: playlistName ?? "Discover Weekly",
-    targetDir: "",
-    total: 0,
-    downloaded: 0,
-    existing: 0,
-    failed: 0,
-    currentTrack: "",
-    percent: 0,
-    status: "starting",
-  };
-  activeSpotifyJob = job;
-
-  const args = [scriptPath, "--url", url, "--json", "--all"];
-  if (playlistId) args.push("--playlist-id", playlistId);
-  if (playlistName) args.push("--playlist-name", playlistName);
-  if (createPlaylist !== false) args.push("--create-playlist");
-
-  const child = spawn(pythonBinary, args, {
-    env: { ...process.env, KOLO_DATA_DIR: root },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-
-  let lineBuffer = "";
-  let errorBuffer = "";
-
-  child.stdout?.on("data", (chunk: Buffer) => {
-    lineBuffer += chunk.toString("utf8");
-    const lines = lineBuffer.split("\n");
-    lineBuffer = lines.pop() ?? "";
-
-    for (const rawLine of lines) {
-      const line = rawLine.trim();
-      if (!line.startsWith("{")) continue;
-      try {
-        const event = JSON.parse(line);
-        if (event.type === "init") {
-          job.playlistName = event.playlistName || job.playlistName;
-          job.playlistId = event.playlistId || job.playlistId;
-          job.targetDir = event.targetDir || "";
-          job.total = event.total || 0;
-          job.existing = event.alreadyPresent || 0;
-          job.status = "downloading";
-        } else if (event.type === "progress") {
-          job.downloaded = event.downloaded || 0;
-          job.failed = event.failed || 0;
-          job.currentTrack = event.track || "";
-          job.percent = event.percent || 0;
-          job.status = "downloading";
-        } else if (event.type === "done") {
-          job.playlistName = event.playlistName || job.playlistName;
-          job.playlistId = event.playlistId || job.playlistId;
-          job.targetDir = event.targetDir || "";
-          job.total = event.total || job.total;
-          job.downloaded = event.downloaded || 0;
-          job.existing = event.existing || 0;
-          job.failed = event.failed || 0;
-          job.percent = 100;
-          job.status = "done";
-        } else if (event.type === "error") {
-          job.status = "error";
-          job.error = event.error;
-        }
-      } catch {
-        // ignore
-      }
-    }
-  });
-
-  child.stderr?.on("data", (chunk: Buffer) => {
-    errorBuffer = (errorBuffer + chunk.toString()).slice(-1500);
-  });
-
-  child.on("error", (err) => {
-    job.status = "error";
-    job.error = err.message;
-  });
-
-  child.on("close", (code) => {
-    if (job.status !== "done" && code !== 0) {
-      job.status = "error";
-      job.error = errorBuffer || `Downloader exited with code ${code}`;
-    } else if (job.status !== "error") {
-      job.status = "done";
-      job.percent = 100;
-    }
-  });
-
-  return job;
-}
-
-function triggerLoudnessScan(root: string, targetPath?: string) {
-  const pythonCandidate = resolve(
-    import.meta.dirname,
-    "..",
-    ".venv",
-    "bin",
-    "python",
-  );
-  const pythonBinary = existsSync(pythonCandidate)
-    ? pythonCandidate
-    : (process.env.KOLO_PYTHON ?? "python3");
-  const scriptPath = resolve(
-    import.meta.dirname,
-    "..",
-    "kolo.2.ml",
-    "scan_loudness.py",
-  );
-  if (!existsSync(scriptPath)) return;
-  const args = [scriptPath];
-  if (targetPath) args.push(targetPath);
-  try {
-    const child = spawn(pythonBinary, args, {
-      env: { ...process.env, KOLO_DATA_DIR: root },
-      stdio: "ignore",
-    });
-    child.on("error", () => {});
-  } catch {}
-}
-
-async function downloadYoutube(root: string, playlistId: string, url: string) {
-  if (!youtubeUrl(url))
-    throw new Error("Only HTTPS YouTube links can be downloaded");
-  const folder = playlistFolder(root, playlistId);
-  mkdirSync(folder, { recursive: true });
-  const binary =
-    process.env.KOLO_YT_DLP ??
-    resolve(import.meta.dirname, "..", ".venv", "bin", "yt-dlp");
-  const executable = existsSync(binary) ? binary : "yt-dlp";
-  await new Promise<void>((done, fail) => {
-    const child = spawn(
-      executable,
-      [
-        "--no-playlist",
-        "--restrict-filenames",
-        "-x",
-        "--audio-format",
-        "mp3",
-        "--audio-quality",
-        "0",
-        "--postprocessor-args",
-        "ExtractAudio:-af loudnorm=I=-16:TP=-1.5:LRA=11",
-        "-o",
-        join(folder, "%(title)s-%(id)s.%(ext)s"),
-        url,
-      ],
-      { stdio: ["ignore", "ignore", "pipe"] },
-    );
-    let errors = "";
-    child.stderr.on("data", (chunk: Buffer) => {
-      errors = (errors + chunk.toString()).slice(-1200);
-    });
-    child.on("error", fail);
-    child.on("close", (code) => {
-      if (code === 0) {
-        triggerLoudnessScan(root, folder);
-        done();
-      } else {
-        fail(new Error(errors || `yt-dlp exited with code ${code}`));
-      }
-    });
-  });
+function sendJson(response: any, statusCode: number, value: unknown) {
+  response.statusCode = statusCode;
+  response.setHeader("Content-Type", "application/json");
+  response.end(JSON.stringify(value));
 }
 
 function metadata(filename: string) {
@@ -396,6 +199,15 @@ function scanLibrary(root: string) {
   } catch {
     /* no loudness */
   }
+  // Tracks the scanner has not measured yet get the library's typical gain
+  // instead of playing at their raw level.
+  const knownGains = Object.values(loudnessData)
+    .map((entry) => entry?.gain)
+    .filter((gain): gain is number => typeof gain === "number")
+    .sort((left, right) => left - right);
+  const fallbackGain = knownGains.length
+    ? knownGains[Math.floor(knownGains.length / 2)]
+    : 1.0;
   let aiRatingsData: {
     ratings?: Record<string, { rating?: number; vibeScore?: number }>;
   } = {};
@@ -450,7 +262,9 @@ function scanLibrary(root: string) {
           cluster: clusterInfo?.cluster ?? null,
           genre: clusterInfo?.genre ?? null,
           gain:
-            typeof loudnessInfo?.gain === "number" ? loudnessInfo.gain : 1.0,
+            typeof loudnessInfo?.gain === "number"
+              ? loudnessInfo.gain
+              : fallbackGain,
           lufs:
             typeof loudnessInfo?.lufs === "number" ? loudnessInfo.lufs : null,
         };
@@ -598,46 +412,100 @@ function createLibraryMiddleware() {
         return;
       }
 
-      if (request.method === "POST" && url.pathname === "/api/youtube") {
+      if (request.method === "GET" && url.pathname === "/api/jobs") {
+        sendJson(response, 200, { jobs: listJobs() });
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/jobs/download") {
         const body = JSON.parse((await readBody(request)).toString("utf8")) as {
-          playlistId: string;
           url: string;
+          playlistId?: string;
+          createPlaylist?: boolean;
         };
-        await downloadYoutube(root, body.playlistId, body.url);
+        if (youtubeUrl(body.url)) {
+          const playlistId = body.playlistId ?? "imported";
+          sendJson(
+            response,
+            202,
+            startYoutubeDownload({
+              root,
+              url: body.url,
+              playlistId,
+              playlistName: playlistLabel(root, playlistId),
+              folder: playlistFolder(root, playlistId),
+            }),
+          );
+        } else if (spotifyUrl(body.url)) {
+          sendJson(
+            response,
+            202,
+            startSpotifyImport({
+              root,
+              url: body.url,
+              playlistId: body.playlistId,
+              playlistName: body.playlistId
+                ? playlistLabel(root, body.playlistId)
+                : undefined,
+              createPlaylist: body.createPlaylist !== false,
+            }),
+          );
+        } else {
+          throw new Error(
+            "Only HTTPS YouTube and open.spotify.com links can be downloaded",
+          );
+        }
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/jobs/rating") {
+        const body = JSON.parse((await readBody(request)).toString("utf8")) as {
+          trackIds: unknown;
+          playlistId?: string;
+          playlistName?: string;
+        };
+        const requested = Array.isArray(body.trackIds) ? body.trackIds : [];
+        const trackIds = [...new Set(requested)].filter(
+          (id): id is string =>
+            typeof id === "string" && isLibraryAudio(root, id),
+        );
+        sendJson(
+          response,
+          202,
+          startRating({
+            root,
+            trackIds,
+            playlistId:
+              typeof body.playlistId === "string" ? body.playlistId : null,
+            playlistName:
+              typeof body.playlistName === "string"
+                ? body.playlistName.slice(0, 80)
+                : null,
+          }),
+        );
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/jobs/clear") {
+        clearFinishedJobs();
         response.statusCode = 204;
         response.end();
         return;
       }
 
-      if (request.method === "POST" && url.pathname === "/api/spotify") {
-        const body = JSON.parse((await readBody(request)).toString("utf8")) as {
-          url: string;
-          playlistId?: string;
-          playlistName?: string;
-          createPlaylist?: boolean;
-        };
-        const job = startSpotifyDownload(
-          root,
-          body.url,
-          body.playlistId,
-          body.playlistName,
-          body.createPlaylist,
-        );
-        response.statusCode = 202;
-        response.setHeader("Content-Type", "application/json");
-        response.end(JSON.stringify(job));
-        return;
-      }
-
-      if (request.method === "GET" && url.pathname === "/api/spotify/status") {
-        response.setHeader("Content-Type", "application/json");
-        response.end(
-          JSON.stringify(
-            activeSpotifyJob
-              ? { active: true, ...activeSpotifyJob }
-              : { active: false },
-          ),
-        );
+      const jobAction =
+        request.method === "POST"
+          ? /^\/api\/jobs\/([^/]+)\/(cancel|retry|dismiss)$/.exec(url.pathname)
+          : null;
+      if (jobAction) {
+        const [, id, action] = jobAction;
+        if (action === "cancel") sendJson(response, 200, cancelJob(id));
+        else if (action === "retry") sendJson(response, 202, retryJob(id));
+        else {
+          dismissJob(id);
+          response.statusCode = 204;
+          response.end();
+        }
         return;
       }
 
@@ -658,7 +526,7 @@ function createLibraryMiddleware() {
           output.on("error", reject);
           request.on("error", reject);
         });
-        triggerLoudnessScan(root, target);
+        await triggerLoudnessScan(root, target);
         response.setHeader("Content-Type", "application/json");
         response.end(JSON.stringify({ imported: 1 }));
         return;
@@ -737,13 +605,18 @@ function createLibraryMiddleware() {
 
 export function koloLibraryPlugin(): Plugin {
   const middleware = createLibraryMiddleware();
+  // Catch up on tracks added outside the app (download scripts, manual
+  // copies). Only when serving: a build must not start a scan.
+  const scanOnStart = () => void triggerLoudnessScan(dataRoot());
   return {
     name: "kolo-local-library",
     configureServer(server) {
       server.middlewares.use(middleware);
+      scanOnStart();
     },
     configurePreviewServer(server) {
       server.middlewares.use(middleware);
+      scanOnStart();
     },
   };
 }

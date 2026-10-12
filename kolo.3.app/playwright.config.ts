@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 import { resolve } from "node:path";
 
 const testDataDir = resolve(import.meta.dirname, ".playwright-data");
+const fixturesDir = resolve(import.meta.dirname, "tests", "fixtures");
 
 export default defineConfig({
   testDir: "./tests",
@@ -29,7 +30,15 @@ export default defineConfig({
     url: "http://127.0.0.1:1425/api/library",
     timeout: 60_000,
     reuseExistingServer: false,
-    env: { ...process.env, KOLO_DATA_DIR: testDataDir, PORT: "1425" },
+    // The helper overrides keep downloads and rating runs off the network and
+    // out of the personal library.
+    env: {
+      ...process.env,
+      KOLO_DATA_DIR: testDataDir,
+      KOLO_PYTHON: resolve(fixturesDir, "fake-python.mjs"),
+      KOLO_YT_DLP: resolve(fixturesDir, "fake-yt-dlp.mjs"),
+      PORT: "1425",
+    },
     stdout: "pipe",
     stderr: "pipe",
   },

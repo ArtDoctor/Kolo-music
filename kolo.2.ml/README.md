@@ -66,6 +66,6 @@ Score local audio or a YouTube URL:
 | `download_playlist_latest.py` | Import Spotify track metadata and find matching audio with yt-dlp |
 | `download_liked_songs.py` | Download saved Spotify tracks through spotdl |
 | `download_negatives.py` | Collect contrast samples for the binary benchmark |
-| `scan_loudness.py` | Measure EBU R128 loudness with FFmpeg and store attenuation gains |
+| `scan_loudness.py` | Measure EBU R128 loudness with FFmpeg and store playback gains |
 
 Downloading from third-party services is subject to their terms and to local copyright law. These utilities are intended for audio the user is permitted to download.

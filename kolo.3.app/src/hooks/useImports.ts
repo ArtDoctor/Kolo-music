@@ -1,16 +1,15 @@
 import { isTauri } from "@tauri-apps/api/core";
 import { useRef, useState, type Dispatch, type SetStateAction } from "react";
+import type { DownloadRequest } from "../jobs";
 import {
   createPlaylist,
-  downloadSpotify,
-  downloadYoutube,
-  getSpotifyStatus,
   importTracks,
+  isSpotifyLink,
   isYouTubeLink,
   openExternal,
+  parseDownloadLinks,
   saveLike,
   youtubeSearchUrl,
-  type SpotifyDownloadStatus,
 } from "../library";
 import type { LibrarySnapshot } from "../types";
 
@@ -21,6 +20,8 @@ interface ImportsOptions {
   setSettingsPage: Dispatch<SetStateAction<boolean>>;
   setNotice: Dispatch<SetStateAction<string | null>>;
   refreshLibrary: () => Promise<LibrarySnapshot | undefined>;
+  // Starts background downloads and resolves to how many were accepted.
+  startDownloads: (requests: DownloadRequest[]) => Promise<number>;
 }
 
 export function useImports({
@@ -30,12 +31,10 @@ export function useImports({
   setSettingsPage,
   setNotice,
   refreshLibrary,
+  startDownloads,
 }: ImportsOptions) {
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkInput, setLinkInput] = useState("");
-  const [downloading, setDownloading] = useState(false);
-  const [spotifyStatus, setSpotifyStatus] =
-    useState<SpotifyDownloadStatus | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importPlaylistRef = useRef("imported");
 
@@ -80,100 +79,43 @@ export function useImports({
     }
   }
 
-  async function downloadSpotifyLink() {
-    const input = linkInput.trim();
-    if (!input) return;
-    try {
-      setDownloading(true);
-      setNotice("Fetching Spotify playlist info…");
-      const isCustomOrSpecial =
-        selectedPlaylist.startsWith("custom:") ||
-        selectedPlaylist === "discovery" ||
-        selectedPlaylist === "imported";
-      const createNew = !isCustomOrSpecial;
-      const targetPlaylist = createNew ? undefined : selectedPlaylist;
-      const res = await downloadSpotify(
-        input,
-        targetPlaylist,
-        undefined,
-        createNew,
-      );
-
-      if (isTauri()) {
-        await refreshLibrary();
-        if (res.playlistId) setSelectedPlaylist(res.playlistId);
-        setNotice(`Finished downloading ${res.playlistName || "playlist"}!`);
-        setDownloading(false);
-        setLinkOpen(false);
-        return;
-      }
-
-      const pollTimer = window.setInterval(async () => {
-        try {
-          const status = await getSpotifyStatus();
-          setSpotifyStatus(status);
-          if (status.status === "downloading" && status.currentTrack) {
-            setNotice(
-              `[${status.downloaded ?? 0}/${status.total ?? 0}] ${status.currentTrack}`,
-            );
-            if (status.downloaded && status.downloaded > 0) {
-              await refreshLibrary();
-            }
-          }
-          if (status.status === "done" || !status.active) {
-            window.clearInterval(pollTimer);
-            setDownloading(false);
-            setSpotifyStatus(null);
-            await refreshLibrary();
-            if (status.playlistId) setSelectedPlaylist(status.playlistId);
-            setNotice(
-              `Imported ${status.downloaded ?? "all"} songs from ${status.playlistName || "Spotify"}!`,
-            );
-            setLinkOpen(false);
-          } else if (status.status === "error") {
-            window.clearInterval(pollTimer);
-            setDownloading(false);
-            setSpotifyStatus(null);
-            setNotice(
-              `Spotify import failed: ${status.error || "Unknown error"}`,
-            );
-          }
-        } catch {
-          // ignore polling errors
-        }
-      }, 1000);
-    } catch (reason) {
-      setDownloading(false);
-      setNotice(
-        reason instanceof Error
-          ? reason.message
-          : "Download failed. Make sure Python and yt-dlp are installed.",
-      );
-    }
+  // Songs live in folders, so views such as Liked songs or a rating filter
+  // cannot receive files; anything added from there goes to Imports.
+  function folderTarget() {
+    return library?.playlists.some(
+      (playlist) => playlist.id === selectedPlaylist && playlist.id !== "liked",
+    )
+      ? selectedPlaylist
+      : "imported";
   }
 
-  async function downloadLink() {
-    try {
-      setDownloading(true);
-      const target =
-        selectedPlaylist === "liked" ||
-        selectedPlaylist.startsWith("rating:") ||
-        selectedPlaylist === "home"
-          ? "imported"
-          : selectedPlaylist;
-      await downloadYoutube(target, linkInput.trim());
-      await refreshLibrary();
-      setLinkOpen(false);
-      setNotice("YouTube audio added with peak loudness limiter applied.");
-    } catch (reason) {
-      setNotice(
-        reason instanceof Error
-          ? reason.message
-          : "Download failed. Is yt-dlp and ffmpeg installed?",
-      );
-    } finally {
-      setDownloading(false);
-    }
+  async function downloadLinks() {
+    const links = parseDownloadLinks(linkInput);
+    if (!links.length) return;
+    const target = folderTarget();
+    const targetName = library?.playlists.find(
+      (playlist) => playlist.id === target,
+    )?.name;
+    // A Spotify collection becomes its own playlist unless the open playlist
+    // is one the user fills by hand.
+    const spotifyIntoSelected =
+      selectedPlaylist.startsWith("custom:") ||
+      selectedPlaylist === "discovery" ||
+      selectedPlaylist === "imported";
+    const started = await startDownloads(
+      links.map((url) =>
+        isSpotifyLink(url) && !spotifyIntoSelected
+          ? { url, createPlaylist: true }
+          : {
+              url,
+              playlistId: target,
+              playlistName: targetName,
+              createPlaylist: false,
+            },
+      ),
+    );
+    // The panel stays open so the next link can be pasted straight away.
+    if (started) setLinkInput("");
   }
 
   async function beginImport(files?: File[]) {
@@ -205,12 +147,7 @@ export function useImports({
   }
 
   function openImport() {
-    importPlaylistRef.current =
-      selectedPlaylist === "liked" ||
-      selectedPlaylist.startsWith("rating:") ||
-      selectedPlaylist === "home"
-        ? "imported"
-        : selectedPlaylist;
+    importPlaylistRef.current = folderTarget();
     if (isTauri()) void beginImport();
     else fileInputRef.current?.click();
   }
@@ -220,13 +157,10 @@ export function useImports({
     setLinkOpen,
     linkInput,
     setLinkInput,
-    downloading,
-    spotifyStatus,
     fileInputRef,
     createNewPlaylist,
     handleLink,
-    downloadSpotifyLink,
-    downloadLink,
+    downloadLinks,
     beginImport,
     openImport,
   };

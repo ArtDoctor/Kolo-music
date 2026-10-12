@@ -29,7 +29,7 @@ Playback uses one HTML audio element so the web and desktop shells share the sam
 - a visible queue panel;
 - automatic advance when a track ends.
 
-When loudness limiting is enabled, Kolo applies the stored attenuation gain for the current track. The scanner never boosts quiet tracks.
+When loudness normalization is enabled, Kolo applies the stored gain for the current track so every track plays at about -14 LUFS. Loud tracks are attenuated and quiet tracks are boosted by up to 12 dB. A boost uses the headroom between the volume slider and full volume, so at very high slider positions the quietest tracks are boosted less. The Vite backend measures new tracks on import and scans for unmeasured tracks at startup.
 
 ## Ratings and predictions
 

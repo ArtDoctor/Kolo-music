@@ -136,6 +136,15 @@ export function isYouTubeLink(value: string) {
   }
 }
 
+// The links in a pasted line, or nothing if any part of it is not a
+// downloadable link (the text is then a search phrase).
+export function parseDownloadLinks(value: string): string[] {
+  const parts = value.trim().split(/\s+/).filter(Boolean);
+  if (!parts.every((part) => isYouTubeLink(part) || isSpotifyLink(part)))
+    return [];
+  return [...new Set(parts)];
+}
+
 export function youtubeSearchUrl(query: string) {
   return `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
 }
@@ -161,82 +170,6 @@ export async function searchTrackOnYouTube(track: {
   const query = getTrackSearchQuery(track);
   if (!query) return;
   await openExternal(youtubeSearchUrl(query));
-}
-
-export interface SpotifyDownloadStatus {
-  active: boolean;
-  id?: string;
-  url?: string;
-  playlistId?: string;
-  playlistName?: string;
-  total?: number;
-  downloaded?: number;
-  existing?: number;
-  failed?: number;
-  currentTrack?: string;
-  percent?: number;
-  status?: "starting" | "downloading" | "done" | "error";
-  error?: string;
-}
-
-export async function downloadSpotify(
-  url: string,
-  playlistId?: string,
-  playlistName?: string,
-  createPlaylist?: boolean,
-): Promise<{ playlistId?: string; playlistName?: string }> {
-  if (isTauri()) {
-    const resStr = await invoke<string>("download_spotify", {
-      url,
-      playlistId: playlistId ?? null,
-      playlistName: playlistName ?? null,
-      createPlaylist: createPlaylist ?? true,
-    });
-    try {
-      const parsed = JSON.parse(resStr);
-      return {
-        playlistId: parsed.playlistId,
-        playlistName: parsed.playlistName,
-      };
-    } catch {
-      return {};
-    }
-  }
-
-  const response = await fetch("/api/spotify", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url, playlistId, playlistName, createPlaylist }),
-  });
-  if (!response.ok) {
-    const data = (await response.json().catch(() => ({}))) as {
-      error?: string;
-    };
-    throw new Error(data.error || "Could not start Spotify import");
-  }
-  return response.json();
-}
-
-export async function getSpotifyStatus(): Promise<SpotifyDownloadStatus> {
-  if (isTauri()) {
-    return { active: false };
-  }
-  const response = await fetch("/api/spotify/status");
-  if (!response.ok) return { active: false };
-  return response.json() as Promise<SpotifyDownloadStatus>;
-}
-
-export async function downloadYoutube(playlistId: string, url: string) {
-  if (isTauri()) return invoke<void>("download_youtube", { playlistId, url });
-  const response = await fetch("/api/youtube", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ playlistId, url }),
-  });
-  if (!response.ok)
-    throw new Error(
-      ((await response.json()) as { error: string }).error || "Download failed",
-    );
 }
 
 export async function importTracks(playlistId: string, browserFiles?: File[]) {

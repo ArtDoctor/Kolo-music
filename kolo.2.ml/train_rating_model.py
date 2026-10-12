@@ -33,7 +33,7 @@ from sklearn.svm import SVR
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-from kolo_rating_model import VibeRatingModel  # noqa: E402
+from kolo_rating_model import VibeRatingModel, ai_rating_entry  # noqa: E402
 
 AUDIO_EXTENSIONS = {".mp3", ".m4a", ".wav", ".flac", ".ogg", ".webm", ".aac", ".opus"}
 MODEL_NAME = "Preference Ensemble (RBF SVR + Extra Trees)"
@@ -150,36 +150,11 @@ def evaluate_models(features: np.ndarray, labels: np.ndarray, seed: int):
     return wrapper, selected_predictions, all_metrics
 
 
-def category(rating: float) -> str:
-    if rating >= 4.5:
-        return "absolute favorite candidate"
-    if rating >= 4.0:
-        return "strong recommendation"
-    if rating >= 3.5:
-        return "listen from time to time"
-    if rating >= 3.0:
-        return "occasional listen"
-    if rating >= 2.5:
-        return "some good parts"
-    return "not your vibe"
-
-
 def score_library(model: VibeRatingModel, vectors: dict[str, np.ndarray], data_root: Path):
     track_ids = sorted(vectors)
     features = np.asarray([vectors[track_id] for track_id in track_ids], dtype=np.float32)
     predicted = model.predict_rating(features)
-    vibes = model.predict_vibe_score(features)
-    exported = {}
-    for track_id, rating, vibe in zip(track_ids, predicted, vibes):
-        raw_rating = float(rating)
-        # The app displays half-star steps but retains the raw estimate for reports.
-        displayed_rating = round(raw_rating * 2) / 2
-        exported[track_id] = {
-            "rating": displayed_rating,
-            "rawRating": round(raw_rating, 2),
-            "vibeScore": round(float(vibe), 3),
-            "category": category(displayed_rating),
-        }
+    exported = {track_id: ai_rating_entry(float(rating)) for track_id, rating in zip(track_ids, predicted)}
     payload = {
         "version": "3.0",
         "model": model.model_name,
