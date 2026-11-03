@@ -5,14 +5,16 @@ import {
   ChevronRight,
   ChevronUp,
   Home,
+  Keyboard,
   Plus,
   Search,
   Settings2,
   UserRound,
   X,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { playlistIcon } from "../appConfig";
+import { useDismiss } from "../hooks/useDismiss";
 import type { Playlist } from "../types";
 
 interface SidebarProps {
@@ -102,6 +104,7 @@ export function Sidebar({
               }
               aria-expanded={showHiddenPlaylists}
             >
+              <span>Excluded</span>
               {showHiddenPlaylists ? (
                 <ChevronUp size={16} />
               ) : (
@@ -138,7 +141,9 @@ interface TopBarProps {
   onQueryChange: (value: string) => void;
   onClearQuery: () => void;
   onToggleProfile: () => void;
+  onCloseProfile: () => void;
   onOpenSettings: () => void;
+  onOpenShortcuts?: () => void;
 }
 
 export function TopBar({
@@ -151,8 +156,13 @@ export function TopBar({
   onQueryChange,
   onClearQuery,
   onToggleProfile,
+  onCloseProfile,
   onOpenSettings,
+  onOpenShortcuts,
 }: TopBarProps) {
+  const profileRef = useRef<HTMLDivElement>(null);
+  useDismiss(profileRef, profileOpen, onCloseProfile);
+
   return (
     <header className="topbar">
       <div className="topbar-left">
@@ -169,12 +179,25 @@ export function TopBar({
       <label className="search-box">
         <Search />
         <input
+          id="kolo-search"
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            if (query) onClearQuery();
+            else event.currentTarget.blur();
+          }}
           placeholder="Search your music"
+          aria-label="Search your music"
         />
+        {!query && (
+          <kbd className="search-shortcut-hint" aria-hidden="true">
+            /
+          </kbd>
+        )}
         {query && (
-          <button onClick={onClearQuery}>
+          <button onClick={onClearQuery} aria-label="Clear search">
             <X />
           </button>
         )}
@@ -182,11 +205,12 @@ export function TopBar({
 
       <div className="topbar-actions">
         {activity}
-        <div className="profile-wrap">
+        <div className="profile-wrap" ref={profileRef}>
           <button
             className="avatar"
             onClick={onToggleProfile}
             aria-label="Open profile"
+            aria-expanded={profileOpen}
           >
             AK
           </button>
@@ -203,6 +227,9 @@ export function TopBar({
               </div>
               <button onClick={onOpenSettings}>
                 <Settings2 /> Settings
+              </button>
+              <button onClick={onOpenShortcuts}>
+                <Keyboard /> Keyboard shortcuts
               </button>
             </div>
           )}

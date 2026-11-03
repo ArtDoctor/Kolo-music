@@ -336,7 +336,6 @@ def download(search: dict[str, Any], staging: Path) -> Path | None:
         "no_warnings": True,
         "noplaylist": True,
         "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "mp3", "preferredquality": "192"}],
-        "postprocessor_args": {"ExtractAudio": ["-af", "loudnorm=I=-16:TP=-1.5:LRA=11"]},
     }
     with yt_dlp.YoutubeDL(options) as ydl:
         ydl.download([search["source_url"]])

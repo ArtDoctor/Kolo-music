@@ -1,12 +1,34 @@
-import { Check, Globe, Heart, Shuffle, Sparkles, Star } from "lucide-react";
-import { useMemo, type CSSProperties } from "react";
 import {
+  Check,
+  Clock,
+  Globe,
+  Heart,
+  Music2,
+  Play,
+  Sparkles,
+  Star,
+} from "lucide-react";
+import { useMemo } from "react";
+import "../home.css";
+import {
+  formatTotalDuration,
   GENRE_CLUSTERS,
+  RATING_FILTERS,
   type GenreCluster,
   type RatingFilterType,
 } from "../appConfig";
 import type { LibrarySnapshot, Track } from "../types";
 import { Artwork } from "./Artwork";
+
+export interface HomePageProps {
+  library: LibrarySnapshot;
+  onPlayRated: (minStars: number) => void;
+  onViewRated: (filterKey: RatingFilterType) => void;
+  onPlayGenre: (genre: GenreCluster) => void;
+  onViewGenre: (genre: GenreCluster) => void;
+  onOpenVisualization: () => void;
+  onPlayTrack: (track: Track) => void;
+}
 
 export function HomePage({
   library,
@@ -14,397 +36,335 @@ export function HomePage({
   onViewRated,
   onPlayGenre,
   onViewGenre,
-  onSelectPlaylist,
   onOpenVisualization,
   onPlayTrack,
-}: {
-  library: LibrarySnapshot;
-  onPlayRated: (minStars: number) => void;
-  onViewRated: (filterKey: RatingFilterType) => void;
-  onPlayGenre: (genre: GenreCluster) => void;
-  onViewGenre: (genre: GenreCluster) => void;
-  onSelectPlaylist: (playlist: { id: string; name?: string }) => void;
-  onOpenVisualization: () => void;
-  onPlayTrack: (track: Track) => void;
-}) {
+}: HomePageProps) {
   const allTracks = library.tracks;
-  const fiveStarsCount = useMemo(
-    () => allTracks.filter((t) => t.rating === 5).length,
+
+  const greeting = useMemo(() => {
+    const hour = new Date().getHours();
+    if (hour < 12) return "Good morning";
+    if (hour < 18) return "Good afternoon";
+    return "Good evening";
+  }, []);
+
+  const ratingCounts = useMemo(() => {
+    const counts = {} as Record<keyof typeof RATING_FILTERS, number>;
+    for (const [key, matches] of Object.entries(RATING_FILTERS))
+      counts[key as keyof typeof RATING_FILTERS] =
+        allTracks.filter(matches).length;
+    return counts;
+  }, [allTracks]);
+  const ratedCount = ratingCounts.rated;
+  const likedCount = useMemo(
+    () => allTracks.filter((t) => t.liked).length,
     [allTracks],
   );
-  const fourHalfCount = useMemo(
-    () => allTracks.filter((t) => (t.rating ?? 0) >= 4.5).length,
-    [allTracks],
-  );
-  const fourStarsCount = useMemo(
-    () => allTracks.filter((t) => (t.rating ?? 0) >= 4).length,
-    [allTracks],
-  );
-  const threeHalfCount = useMemo(
-    () => allTracks.filter((t) => (t.rating ?? 0) >= 3.5).length,
-    [allTracks],
-  );
-  const ratedCount = useMemo(
-    () => allTracks.filter((t) => t.rating !== null && t.rating > 0).length,
-    [allTracks],
-  );
-  const unratedCount = useMemo(
+
+  const ratedPercent = useMemo(
     () =>
-      allTracks.filter(
-        (t) =>
-          t.rating === null &&
-          t.playlistId !== "negative" &&
-          !t.id.startsWith("neg/"),
-      ).length,
-    [allTracks],
+      allTracks.length ? Math.round((ratedCount / allTracks.length) * 100) : 0,
+    [allTracks.length, ratedCount],
   );
-  const shelfTracks = useMemo(
-    () =>
-      [...allTracks]
-        .sort((a, b) => (b.rating ?? -1) - (a.rating ?? -1))
-        .slice(0, 8),
-    [allTracks],
-  );
+
+  // Durations are probed lazily, so a sum over a mostly unprobed library
+  // would understate it badly.
+  const totalListeningTime = useMemo(() => {
+    const known = allTracks.filter((track) => track.duration > 0);
+    if (!known.length || known.length < allTracks.length * 0.9) return null;
+    return formatTotalDuration(
+      known.reduce((sum, track) => sum + track.duration, 0),
+    );
+  }, [allTracks]);
+
+  // Stable random sample of songs rated >= 4, keyed on library track count
+  const favoriteTracks = useMemo(() => {
+    const candidates = allTracks.filter((t) => (t.rating ?? 0) >= 4);
+    if (!candidates.length) return [];
+    let seed = allTracks.length * 1664525 + 1013904223;
+    const rand = () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+    const shuffled = [...candidates];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1));
+      const tmp = shuffled[i];
+      shuffled[i] = shuffled[j];
+      shuffled[j] = tmp;
+    }
+    return shuffled.slice(0, 12);
+  }, [allTracks.length, allTracks]);
+
+  // Top 12 by mtime
+  const recentTracks = useMemo(() => {
+    return [...allTracks]
+      .sort((a, b) => (b.mtime ?? 0) - (a.mtime ?? 0))
+      .slice(0, 12);
+  }, [allTracks]);
+
+  // Preview tracks per genre cluster
+  const genreTracksMap = useMemo(() => {
+    const map = new Map<number, Track[]>();
+    for (const genre of GENRE_CLUSTERS) {
+      map.set(genre.id, []);
+    }
+    for (const track of allTracks) {
+      if (track.cluster !== null && track.cluster !== undefined) {
+        const list = map.get(track.cluster);
+        if (list && list.length < 5) {
+          list.push(track);
+        }
+      }
+    }
+    return map;
+  }, [allTracks]);
+
+  const genreCounts = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const genre of GENRE_CLUSTERS) {
+      counts.set(genre.id, 0);
+    }
+    for (const track of allTracks) {
+      if (track.cluster !== null && track.cluster !== undefined) {
+        const c = counts.get(track.cluster);
+        if (c !== undefined) {
+          counts.set(track.cluster, c + 1);
+        }
+      }
+    }
+    return counts;
+  }, [allTracks]);
+
+  const ratingTiles: {
+    filter: keyof typeof RATING_FILTERS;
+    label: string;
+    // Lowest rating played by the tile's play button; none for unrated.
+    minStars?: number;
+  }[] = [
+    { filter: "5", label: "5.0 Stars", minStars: 5 },
+    { filter: "4.5", label: "4.5+ Stars", minStars: 4.5 },
+    { filter: "4", label: "4.0+ Stars", minStars: 4 },
+    { filter: "3.5", label: "3.5+ Stars", minStars: 3.5 },
+    { filter: "rated", label: "All Rated", minStars: 0.5 },
+    { filter: "unrated", label: "Non-Rated" },
+  ];
 
   return (
-    <div
-      className="home-page-content"
-      style={{ display: "flex", flexDirection: "column", gap: "28px" }}
-    >
-      <div className="home-hero">
-        <div>
-          <span className="page-kicker">Personal Music Manifold</span>
-          <h1>Welcome to Kolo</h1>
+    <div className="home-root">
+      {/* 1. Hero */}
+      <header className="home-hero">
+        <div className="home-hero-text">
+          <span className="home-hero-kicker">{greeting}</span>
+          <h1 className="home-hero-title">Welcome to Kolo</h1>
         </div>
+        <div className="home-hero-stats">
+          <div className="home-hero-chip">
+            <Music2 className="home-chip-icon" size={13} aria-hidden="true" />
+            <span>{allTracks.length.toLocaleString()} songs</span>
+          </div>
+          <div className="home-hero-chip">
+            <Star className="home-chip-icon" size={13} aria-hidden="true" />
+            <span>{ratedPercent}% rated</span>
+          </div>
+          <div className="home-hero-chip">
+            <Heart className="home-chip-icon" size={13} aria-hidden="true" />
+            <span>{likedCount.toLocaleString()} liked</span>
+          </div>
+          {totalListeningTime && (
+            <div className="home-hero-chip">
+              <Clock className="home-chip-icon" size={13} aria-hidden="true" />
+              <span>{totalListeningTime} of music</span>
+            </div>
+          )}
+        </div>
+      </header>
+
+      {/* 2. From your favorites shelf */}
+      {favoriteTracks.length > 0 && (
+        <section className="home-section">
+          <div className="home-section-header">
+            <h2 className="home-section-title">From your favorites</h2>
+            <span className="home-section-meta">
+              {favoriteTracks.length} picks
+            </span>
+          </div>
+          <div className="home-shelf-scroll">
+            {favoriteTracks.map((track) => (
+              <button
+                key={track.id}
+                type="button"
+                className="home-shelf-tile"
+                onClick={() => onPlayTrack(track)}
+                aria-label={`Play ${track.title} by ${track.artist}`}
+              >
+                <div className="home-shelf-art-wrap">
+                  <Artwork track={track} size="large" />
+                  <span className="home-shelf-play-badge" aria-hidden="true">
+                    <Play size={20} fill="currentColor" />
+                  </span>
+                </div>
+                <span className="home-shelf-title">{track.title}</span>
+                <span className="home-shelf-artist">{track.artist}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* 3. Recently added shelf */}
+      {recentTracks.length > 0 && (
+        <section className="home-section">
+          <div className="home-section-header">
+            <h2 className="home-section-title">Recently added</h2>
+            <span className="home-section-meta">
+              {recentTracks.length} tracks
+            </span>
+          </div>
+          <div className="home-shelf-scroll">
+            {recentTracks.map((track) => (
+              <button
+                key={track.id}
+                type="button"
+                className="home-shelf-tile"
+                onClick={() => onPlayTrack(track)}
+                aria-label={`Play ${track.title} by ${track.artist}`}
+              >
+                <div className="home-shelf-art-wrap">
+                  <Artwork track={track} size="large" />
+                  <span className="home-shelf-play-badge" aria-hidden="true">
+                    <Play size={20} fill="currentColor" />
+                  </span>
+                </div>
+                <span className="home-shelf-title">{track.title}</span>
+                <span className="home-shelf-artist">{track.artist}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* 4. 3D Latent Space Explorer */}
+      <div className="home-explorer-banner">
+        <div className="home-explorer-info">
+          <div className="home-explorer-icon-wrap" aria-hidden="true">
+            <Globe size={18} />
+          </div>
+          <div className="home-explorer-text">
+            <h3 className="home-explorer-title">3D Latent Space Explorer</h3>
+            <p className="home-explorer-desc">
+              See your whole library as a 3D map of sound — similar songs sit
+              together.
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          className="home-explorer-btn"
+          onClick={onOpenVisualization}
+          aria-label="Open 3D Space"
+        >
+          <Globe size={15} aria-hidden="true" />
+          <span>Open 3D Space</span>
+        </button>
       </div>
 
-      {/* Spotify-like quick picks shelf */}
-      <section>
-        <div className="section-title">
-          <span>QUICK PICKS</span>
+      {/* 5. Listen by rating */}
+      <section className="home-section">
+        <div className="home-section-header">
+          <h2 className="home-section-title">Listen by rating</h2>
+          <span className="home-section-meta">
+            {ratedCount.toLocaleString()} of {allTracks.length.toLocaleString()}{" "}
+            rated
+          </span>
         </div>
-        <div className="shelf-grid">
-          {shelfTracks.map((track) => (
-            <button
-              key={track.id}
-              type="button"
-              className="shelf-tile"
-              onClick={() => onPlayTrack(track)}
-              title={`Play ${track.title}`}
-            >
-              <Artwork track={track} size="large" />
-              <strong>{track.title}</strong>
-              <small>{track.artist}</small>
-            </button>
+        <div className="home-rating-grid">
+          {ratingTiles.map(({ filter, label, minStars }) => (
+            <div key={filter} className="home-rating-tile-wrap">
+              <button
+                type="button"
+                className="home-rating-tile-btn"
+                onClick={() => onViewRated(filter)}
+                aria-label={`View ${label}`}
+              >
+                <span className="home-rating-count">
+                  {ratingCounts[filter].toLocaleString()}
+                </span>
+                <span className="home-rating-label">
+                  {filter === "unrated" ? (
+                    <Sparkles size={13} aria-hidden="true" />
+                  ) : filter === "rated" ? (
+                    <Check size={13} aria-hidden="true" />
+                  ) : (
+                    <Star
+                      size={13}
+                      fill="currentColor"
+                      className="home-rating-star-icon"
+                      aria-hidden="true"
+                    />
+                  )}
+                  <span>{label}</span>
+                </span>
+              </button>
+              {minStars !== undefined && ratingCounts[filter] > 0 && (
+                <button
+                  type="button"
+                  className="home-rating-play-btn"
+                  onClick={() => onPlayRated(minStars)}
+                  aria-label={`Play ${label.toLowerCase()} songs`}
+                >
+                  <Play size={13} fill="currentColor" />
+                </button>
+              )}
+            </div>
           ))}
         </div>
       </section>
 
-      {/* 3D Visualization Hero Card */}
-      <section className="explorer-card">
-        <div>
-          <h3 style={{ margin: 0 }}>3D Latent Space Explorer</h3>
+      {/* 6. Play by genre */}
+      <section className="home-section">
+        <div className="home-section-header">
+          <h2 className="home-section-title">Play by genre</h2>
+          <span className="home-section-meta">
+            {GENRE_CLUSTERS.length} clusters
+          </span>
         </div>
-        <button className="explorer-btn" onClick={onOpenVisualization}>
-          <Globe size={18} /> Open 3D Space
-        </button>
-      </section>
-
-      {/* Play by Rating */}
-      <section>
-        <div className="section-title">
-          <span>LISTEN BY RATING</span>
-        </div>
-        <div className="rating-cards-grid">
-          <div className="rating-card" onClick={() => onViewRated("5")}>
-            <div className="rating-card-header">
-              <div className="rating-stars-badge">
-                <Star /> 5.0 Stars
-              </div>
-              <span className="rating-count-pill">{fiveStarsCount} songs</span>
-            </div>
-            <div
-              className="rating-card-actions"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <button className="btn-primary" onClick={() => onPlayRated(5)}>
-                <Shuffle size={14} /> Play
-              </button>
-              <button
-                className="btn-secondary"
-                onClick={() => onViewRated("5")}
-              >
-                View
-              </button>
-            </div>
-          </div>
-
-          <div className="rating-card" onClick={() => onViewRated("4.5")}>
-            <div className="rating-card-header">
-              <div className="rating-stars-badge">
-                <Star /> 4.5+ Stars
-              </div>
-              <span className="rating-count-pill">{fourHalfCount} songs</span>
-            </div>
-            <div
-              className="rating-card-actions"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <button className="btn-primary" onClick={() => onPlayRated(4.5)}>
-                <Shuffle size={14} /> Play
-              </button>
-              <button
-                className="btn-secondary"
-                onClick={() => onViewRated("4.5")}
-              >
-                View
-              </button>
-            </div>
-          </div>
-
-          <div className="rating-card" onClick={() => onViewRated("4")}>
-            <div className="rating-card-header">
-              <div className="rating-stars-badge">
-                <Star /> 4.0+ Stars
-              </div>
-              <span className="rating-count-pill">{fourStarsCount} songs</span>
-            </div>
-            <div
-              className="rating-card-actions"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <button className="btn-primary" onClick={() => onPlayRated(4.0)}>
-                <Shuffle size={14} /> Play
-              </button>
-              <button
-                className="btn-secondary"
-                onClick={() => onViewRated("4")}
-              >
-                View
-              </button>
-            </div>
-          </div>
-
-          <div className="rating-card" onClick={() => onViewRated("3.5")}>
-            <div className="rating-card-header">
-              <div className="rating-stars-badge">
-                <Star /> 3.5+ Stars
-              </div>
-              <span className="rating-count-pill">{threeHalfCount} songs</span>
-            </div>
-            <div
-              className="rating-card-actions"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <button className="btn-primary" onClick={() => onPlayRated(3.5)}>
-                <Shuffle size={14} /> Play
-              </button>
-              <button
-                className="btn-secondary"
-                onClick={() => onViewRated("3.5")}
-              >
-                View
-              </button>
-            </div>
-          </div>
-
-          <div className="rating-card" onClick={() => onViewRated("rated")}>
-            <div className="rating-card-header">
-              <div className="rating-stars-badge">
-                <Check size={16} /> All Rated
-              </div>
-              <span className="rating-count-pill">{ratedCount} songs</span>
-            </div>
-            <div
-              className="rating-card-actions"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <button
-                className="btn-secondary"
-                style={{ flex: 1 }}
-                onClick={() => onViewRated("rated")}
-              >
-                View Rated
-              </button>
-            </div>
-          </div>
-
-          <div className="rating-card" onClick={() => onViewRated("unrated")}>
-            <div className="rating-card-header">
-              <div className="rating-stars-badge" style={{ color: "#aaa" }}>
-                <Sparkles size={16} /> Non-Rated
-              </div>
-              <span className="rating-count-pill">{unratedCount} songs</span>
-            </div>
-            <div
-              className="rating-card-actions"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <button
-                className="btn-secondary"
-                style={{ flex: 1 }}
-                onClick={() => onViewRated("unrated")}
-              >
-                View Non-Rated
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Play by Genre */}
-      <section>
-        <div className="section-title">
-          <span>PLAY BY GENRE</span>
-        </div>
-        <div className="genres-grid">
+        <div className="home-genres-grid">
           {GENRE_CLUSTERS.map((genre) => {
-            const count = allTracks.filter(
-              (t) => t.cluster === genre.id,
-            ).length;
+            const count = genreCounts.get(genre.id) ?? 0;
+            const previewTracks = genreTracksMap.get(genre.id) ?? [];
             return (
-              <div
-                key={genre.id}
-                className="genre-card"
-                style={{ "--genre-color": genre.color } as CSSProperties}
-                onClick={() => onViewGenre(genre)}
-              >
-                <div className="genre-card-header">
-                  <strong>{genre.name}</strong>
-                  <span>{count} tracks</span>
-                </div>
-                <p>{genre.desc}</p>
-                <div className="genre-preview">
-                  {allTracks
-                    .filter((t) => t.cluster === genre.id)
-                    .slice(0, 4)
-                    .map((t) => (
-                      <Artwork key={t.id} track={t} size="small" />
-                    ))}
-                </div>
-                <div
-                  className="genre-card-actions"
-                  onClick={(e) => e.stopPropagation()}
+              <div key={genre.id} className="home-genre-card-wrap">
+                <button
+                  type="button"
+                  className="home-genre-card-btn"
+                  onClick={() => onViewGenre(genre)}
+                  aria-label={`View ${genre.name} genre`}
                 >
-                  <button
-                    className="btn-primary"
-                    onClick={() => onPlayGenre(genre)}
-                  >
-                    <Shuffle size={14} /> Play Genre
-                  </button>
-                  <button
-                    className="btn-secondary"
-                    onClick={() => onViewGenre(genre)}
-                  >
-                    View All
-                  </button>
-                </div>
+                  <div className="home-genre-header">
+                    <span className="home-genre-name">{genre.name}</span>
+                    <span className="home-genre-pill">{count} tracks</span>
+                  </div>
+                  <p className="home-genre-desc">{genre.desc}</p>
+                  <div className="home-genre-artworks" aria-hidden="true">
+                    {previewTracks.map((t) => (
+                      <div key={t.id} className="home-genre-art-item">
+                        <Artwork track={t} size="small" />
+                      </div>
+                    ))}
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  className="home-genre-play-btn"
+                  onClick={() => onPlayGenre(genre)}
+                  aria-label={`Play ${genre.name}`}
+                >
+                  <Play size={16} fill="currentColor" />
+                </button>
               </div>
             );
           })}
-        </div>
-      </section>
-
-      {/* Quick Playlists Access */}
-      <section>
-        <div className="section-title">
-          <span>LIBRARY FOLDERS</span>
-          <span>Local storage partitions</span>
-        </div>
-        <div className="rating-cards-grid">
-          <div
-            className="rating-card"
-            onClick={() => onSelectPlaylist({ id: "pos", name: "Phone music" })}
-          >
-            <div className="rating-card-header">
-              <strong>Phone music</strong>
-              <span className="rating-count-pill">
-                {library.playlists.find((p) => p.id === "pos")?.count ?? 0}
-              </span>
-            </div>
-            <p style={{ margin: 0, fontSize: "12px", color: "#888" }}>
-              Your main mobile collection and primary training positive dataset.
-            </p>
-            <div
-              className="rating-card-actions"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <button
-                className="btn-primary"
-                onClick={() =>
-                  onSelectPlaylist({ id: "pos", name: "Phone music" })
-                }
-              >
-                Open Folder
-              </button>
-            </div>
-          </div>
-
-          <div
-            className="rating-card"
-            onClick={() =>
-              onSelectPlaylist({ id: "imported", name: "Imports" })
-            }
-          >
-            <div className="rating-card-header">
-              <strong>Imports</strong>
-              <span className="rating-count-pill">
-                {library.playlists.find((p) => p.id === "imported")?.count ?? 0}
-              </span>
-            </div>
-            <p style={{ margin: 0, fontSize: "12px", color: "#888" }}>
-              Downloads from YouTube links, Spotify tracks, and drag-and-drop
-              files.
-            </p>
-            <div
-              className="rating-card-actions"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <button
-                className="btn-primary"
-                onClick={() =>
-                  onSelectPlaylist({ id: "imported", name: "Imports" })
-                }
-              >
-                Open Imports
-              </button>
-            </div>
-          </div>
-
-          <div
-            className="rating-card"
-            onClick={() =>
-              onSelectPlaylist({ id: "liked", name: "Liked songs" })
-            }
-          >
-            <div className="rating-card-header">
-              <strong
-                style={{ display: "flex", alignItems: "center", gap: "6px" }}
-              >
-                <Heart size={15} fill="currentColor" color="var(--accent)" />{" "}
-                Liked songs
-              </strong>
-              <span className="rating-count-pill">
-                {library.playlists.find((p) => p.id === "liked")?.count ?? 0}
-              </span>
-            </div>
-            <p style={{ margin: 0, fontSize: "12px", color: "#888" }}>
-              All songs marked with a heart across any collection.
-            </p>
-            <div
-              className="rating-card-actions"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <button
-                className="btn-primary"
-                onClick={() =>
-                  onSelectPlaylist({ id: "liked", name: "Liked songs" })
-                }
-              >
-                Open Liked
-              </button>
-            </div>
-          </div>
         </div>
       </section>
     </div>

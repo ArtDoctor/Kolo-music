@@ -26,7 +26,9 @@ export function Artwork({
           loading="lazy"
         />
       ) : (
-        <span>{track.title.slice(0, 1).toUpperCase()}</span>
+        <span>
+          {(track.title.match(/[\p{L}\p{N}]/u)?.[0] ?? "♪").toUpperCase()}
+        </span>
       )}
     </div>
   );

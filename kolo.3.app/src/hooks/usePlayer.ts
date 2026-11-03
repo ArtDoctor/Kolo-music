@@ -10,10 +10,23 @@ import {
 import { playbackVolume, tracksInPlaylist } from "../appConfig";
 import type {
   LibrarySnapshot,
+  Notify,
   PlayerSettings,
   RepeatMode,
   Track,
 } from "../types";
+import {
+  readLocalStorage,
+  useLocalStorage,
+  writeLocalStorage,
+} from "./useLocalStorage";
+
+const POSITION_KEY = "kolo.position";
+
+interface SavedPosition {
+  id: string;
+  time: number;
+}
 
 interface PlayerOptions {
   library: LibrarySnapshot | null;
@@ -22,7 +35,7 @@ interface PlayerOptions {
   playlistName: string;
   settings: PlayerSettings;
   setSettings: Dispatch<SetStateAction<PlayerSettings>>;
-  setNotice: Dispatch<SetStateAction<string | null>>;
+  setNotice: Notify;
   currentId: string | null;
   setCurrentId: Dispatch<SetStateAction<string | null>>;
 }
@@ -41,15 +54,35 @@ export function usePlayer({
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [shuffle, setShuffle] = useState(false);
-  const [queueIds, setQueueIds] = useState<string[]>([]);
-  const [queueName, setQueueName] = useState("Phone music");
-  const [queueSource, setQueueSource] = useState("home");
-  const [repeatMode, setRepeatMode] = useState<RepeatMode>("off");
+  const [shuffle, setShuffle] = useLocalStorage("kolo.shuffle", false);
+  const [queueIds, setQueueIds] = useLocalStorage<string[]>(
+    "kolo.queueIds",
+    [],
+  );
+  // The unshuffled order, so turning shuffle off after a restart still works.
+  const [originalQueueIds, setOriginalQueueIds] = useLocalStorage<string[]>(
+    "kolo.originalQueueIds",
+    [],
+  );
+  const [queueName, setQueueName] = useLocalStorage(
+    "kolo.queueName",
+    "Phone music",
+  );
+  const [queueSource, setQueueSource] = useLocalStorage(
+    "kolo.queueSource",
+    "home",
+  );
+  const [repeatMode, setRepeatMode] = useLocalStorage<RepeatMode>(
+    "kolo.repeatMode",
+    "off",
+  );
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const shouldAutoplayRef = useRef(false);
-  const originalQueueIdsRef = useRef<string[]>([]);
+  // Where the last session stopped; consumed once the song loads again.
+  const restorePositionRef = useRef(
+    readLocalStorage<SavedPosition | null>(POSITION_KEY, null),
+  );
   const lastVolumeRef = useRef(settings.volume > 0 ? settings.volume : 0.15);
 
   const currentTrack = useMemo(
@@ -74,20 +107,62 @@ export function usePlayer({
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !currentTrack) return;
-    setProgress(0);
+    const restore = restorePositionRef.current;
+    restorePositionRef.current = null;
+    const resumeAt =
+      restore?.id === currentTrack.id && restore.time > 0 ? restore.time : 0;
+    setProgress(resumeAt);
     setDuration(currentTrack.duration);
     if (!audio.paused) audio.pause();
 
     audio.src = currentTrack.audioUrl;
     audio.volume = playbackVolume(settings, currentTrack);
+    if (resumeAt) {
+      audio.addEventListener(
+        "loadedmetadata",
+        () => {
+          // Resuming in the last seconds would just end the song at once.
+          const time = resumeAt < audio.duration - 1 ? resumeAt : 0;
+          audio.currentTime = time;
+          setProgress(time);
+        },
+        { once: true },
+      );
+    }
 
     if (shouldAutoplayRef.current) {
       void audio
         .play()
-        .catch(() => setNotice("This audio format could not be played."));
+        .catch(() =>
+          setNotice("This audio format could not be played.", "error"),
+        );
     }
     shouldAutoplayRef.current = false;
   }, [currentTrack?.audioUrl, currentTrack?.id]);
+
+  // Saved about once a second while playing, and exactly when the app closes.
+  const savedSecond = Math.floor(progress);
+  useEffect(() => {
+    if (!currentId || restorePositionRef.current) return;
+    writeLocalStorage(POSITION_KEY, { id: currentId, time: progress });
+  }, [currentId, savedSecond]);
+
+  useEffect(() => {
+    const save = () => {
+      const audio = audioRef.current;
+      if (!audio || !currentId || restorePositionRef.current) return;
+      writeLocalStorage(POSITION_KEY, {
+        id: currentId,
+        time: audio.currentTime,
+      });
+    };
+    window.addEventListener("pagehide", save);
+    window.addEventListener("beforeunload", save);
+    return () => {
+      window.removeEventListener("pagehide", save);
+      window.removeEventListener("beforeunload", save);
+    };
+  }, [currentId]);
 
   const seek = useCallback(
     (value: number) => {
@@ -129,7 +204,7 @@ export function usePlayer({
       source = selectedPlaylist,
     ) => {
       if (!tracks.length) return;
-      originalQueueIdsRef.current = tracks.map((track) => track.id);
+      setOriginalQueueIds(tracks.map((track) => track.id));
       if (shuffled && tracks.length > 1) {
         const rest = tracks
           .filter((track) => track.id !== first.id)
@@ -166,12 +241,12 @@ export function usePlayer({
           [rest[index], rest[swapIndex]] = [rest[swapIndex], rest[index]];
         }
         setQueueIds(currentId ? [currentId, ...rest] : rest);
-      } else if (originalQueueIdsRef.current.length) {
-        setQueueIds([...originalQueueIdsRef.current]);
+      } else if (originalQueueIds.length) {
+        setQueueIds([...originalQueueIds]);
       }
       return next;
     });
-  }, [currentId, queueIds]);
+  }, [currentId, originalQueueIds, queueIds]);
 
   const playTrack = useCallback(
     (track: Track, contextTracks?: Track[], contextName?: string) => {
@@ -182,7 +257,7 @@ export function usePlayer({
 
       if (track.id === currentId) {
         if (!queueIds.length || queueSource !== selectedPlaylist) {
-          originalQueueIdsRef.current = source.map((item) => item.id);
+          setOriginalQueueIds(source.map((item) => item.id));
           setQueueIds(source.map((item) => item.id));
           setQueueSource(selectedPlaylist);
           setQueueName(name);
@@ -194,7 +269,7 @@ export function usePlayer({
         return;
       }
 
-      originalQueueIdsRef.current = source.map((item) => item.id);
+      setOriginalQueueIds(source.map((item) => item.id));
       setQueueIds(source.map((item) => item.id));
       setQueueName(name);
       setQueueSource(selectedPlaylist);
@@ -222,7 +297,7 @@ export function usePlayer({
           library?.tracks ?? [],
           selectedPlaylist,
         );
-        originalQueueIdsRef.current = source.map((track) => track.id);
+        setOriginalQueueIds(source.map((track) => track.id));
         setQueueIds(source.map((track) => track.id));
         setQueueSource(selectedPlaylist);
         setQueueName(playlistName);
@@ -305,6 +380,7 @@ export function usePlayer({
     duration,
     shuffle,
     queueName,
+    queueSource,
     queueTracks,
     repeatMode,
     setRepeatMode,

@@ -14,6 +14,8 @@ yt-dlp>=2024.0.0
 mutagen>=1.47.0
 SpotipyFree>=0.1.0
 spotdl>=4.2.0
+ytmusicapi>=1.0.0
+rapidfuzz>=3.0.0
 
 # Experiment Tracking & Serialization
 mlflow>=2.10.0

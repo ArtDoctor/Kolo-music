@@ -1,16 +1,17 @@
-import {
-  useCallback,
-  useEffect,
-  useState,
-  type Dispatch,
-  type SetStateAction,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { loadLibrary, saveLike, saveRating } from "../library";
-import type { LibrarySnapshot } from "../types";
+import type { LibrarySnapshot, Notify } from "../types";
+import { useLocalStorage } from "./useLocalStorage";
 
-export function useLibrary(setNotice: Dispatch<SetStateAction<string | null>>) {
+export function useLibrary(setNotice: Notify) {
   const [library, setLibrary] = useState<LibrarySnapshot | null>(null);
-  const [currentId, setCurrentId] = useState<string | null>(null);
+  const [currentId, setCurrentId] = useLocalStorage<string | null>(
+    "kolo.currentId",
+    null,
+  );
+  // The remembered song may have been deleted since the last session; only
+  // check on the first load so a refresh never swaps out a playing song.
+  const validatedRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   const refreshLibrary = useCallback(async () => {
@@ -30,13 +31,20 @@ export function useLibrary(setNotice: Dispatch<SetStateAction<string | null>>) {
         };
       });
       setError(null);
-      setCurrentId(
-        (current) =>
-          current ??
+      const validate = !validatedRef.current;
+      validatedRef.current = true;
+      setCurrentId((current) => {
+        if (
+          current &&
+          (!validate || snapshot.tracks.some((track) => track.id === current))
+        )
+          return current;
+        return (
           snapshot.tracks.find((track) => track.playlistId === "pos")?.id ??
           snapshot.tracks[0]?.id ??
-          null,
-      );
+          null
+        );
+      });
       return snapshot;
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
@@ -61,7 +69,7 @@ export function useLibrary(setNotice: Dispatch<SetStateAction<string | null>>) {
       try {
         await saveRating(trackId, rating);
       } catch {
-        setNotice("The rating could not be saved.");
+        setNotice("The rating could not be saved.", "error");
         await refreshLibrary();
       }
     },
@@ -91,7 +99,7 @@ export function useLibrary(setNotice: Dispatch<SetStateAction<string | null>>) {
       try {
         await saveLike(trackId, liked);
       } catch {
-        setNotice("Like could not be saved.");
+        setNotice("Like could not be saved.", "error");
         await refreshLibrary();
       }
     },

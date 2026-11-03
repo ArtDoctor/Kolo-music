@@ -1,5 +1,10 @@
 export type RepeatMode = "off" | "all" | "one";
 
+export type NoticeTone = "info" | "error";
+
+// Shows a short message in the toast; errors get a warning style.
+export type Notify = (message: string, tone?: NoticeTone) => void;
+
 export interface Playlist {
   id: string;
   name: string;

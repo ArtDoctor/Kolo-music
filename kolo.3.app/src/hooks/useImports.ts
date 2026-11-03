@@ -11,14 +11,14 @@ import {
   saveLike,
   youtubeSearchUrl,
 } from "../library";
-import type { LibrarySnapshot } from "../types";
+import type { LibrarySnapshot, Notify } from "../types";
 
 interface ImportsOptions {
   library: LibrarySnapshot | null;
   selectedPlaylist: string;
   setSelectedPlaylist: Dispatch<SetStateAction<string>>;
   setSettingsPage: Dispatch<SetStateAction<boolean>>;
-  setNotice: Dispatch<SetStateAction<string | null>>;
+  setNotice: Notify;
   refreshLibrary: () => Promise<LibrarySnapshot | undefined>;
   // Starts background downloads and resolves to how many were accepted.
   startDownloads: (requests: DownloadRequest[]) => Promise<number>;
@@ -49,6 +49,7 @@ export function useImports({
     } catch (reason) {
       setNotice(
         reason instanceof Error ? reason.message : "Could not create playlist.",
+        "error",
       );
     }
   }
@@ -75,6 +76,7 @@ export function useImports({
     } catch (reason) {
       setNotice(
         reason instanceof Error ? reason.message : "Could not open link.",
+        "error",
       );
     }
   }
@@ -140,7 +142,10 @@ export function useImports({
       setSettingsPage(false);
       setNotice(`${count} ${count === 1 ? "song" : "songs"} imported.`);
     } catch (reason) {
-      setNotice(reason instanceof Error ? reason.message : "Import failed.");
+      setNotice(
+        reason instanceof Error ? reason.message : "Import failed.",
+        "error",
+      );
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
     }

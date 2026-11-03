@@ -23,7 +23,7 @@ from library_storage import store_lock
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-from kolo_rating_model import ai_rating_entry  # noqa: E402
+from kolo_rating_model import ai_rating_entry, is_candidate_track  # noqa: E402
 
 AUDIO_EXTENSIONS = {".mp3", ".m4a", ".flac", ".wav", ".ogg", ".aac", ".opus", ".webm"}
 LIBRARY_FOLDERS = ("imported", "discovery", "downloads", "pos", "neg", "playlists")
@@ -204,7 +204,8 @@ def rate(
                     new_vectors[track_id] = (embedding, duration)
                 if expected_dim and embedding.shape[0] != expected_dim:
                     raise ValueError(f"Expected a {expected_dim}-dim vector, got {embedding.shape[0]}")
-                entry = ai_rating_entry(float(model.predict_rating(embedding.reshape(1, -1))[0]))
+                raw = model.predict_rating(embedding.reshape(1, -1), candidate=is_candidate_track(track_id))
+                entry = ai_rating_entry(float(raw[0]))
                 store_estimate(ai_path, track_id, entry)
                 rated += 1
                 event.update({"success": True, "rating": entry["rating"]})

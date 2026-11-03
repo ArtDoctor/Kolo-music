@@ -13,6 +13,13 @@ export default defineConfig({
     port,
     strictPort: !process.env.PORT,
     host: host || false,
+    watch: {
+      ignored: [
+        "**/playwright-report/**",
+        "**/test-results/**",
+        "**/.playwright-data/**",
+      ],
+    },
     hmr: host
       ? {
           protocol: "ws",

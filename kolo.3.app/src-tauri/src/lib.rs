@@ -472,8 +472,6 @@ async fn download_youtube(playlist_id: String, url: String) -> Result<(), String
                 "mp3",
                 "--audio-quality",
                 "0",
-                "--postprocessor-args",
-                "ExtractAudio:-af loudnorm=I=-16:TP=-1.5:LRA=11",
                 "-o",
             ])
             .arg(folder.join("%(title)s-%(id)s.%(ext)s"))

@@ -8,6 +8,8 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
+import { useRef } from "react";
+import { useDismiss } from "../hooks/useDismiss";
 import { isActiveJob } from "../jobs";
 import type { Job, JobKind } from "../types";
 
@@ -34,6 +36,7 @@ interface JobListProps extends JobActions {
 interface ActivityProps extends JobListProps {
   open: boolean;
   onToggle: () => void;
+  onClose: () => void;
 }
 
 function jobIcon(job: Job) {
@@ -206,8 +209,12 @@ export function Downloads(props: JobListProps) {
 }
 
 // Top-bar summary of every job, with the full list one click away.
-export function Activity({ open, onToggle, ...list }: ActivityProps) {
+export function Activity({ open, onToggle, onClose, ...list }: ActivityProps) {
   const { jobs } = list;
+  const wrapRef = useRef<HTMLDivElement>(null);
+  // Stays open on outside clicks so downloads can be watched while more
+  // links are added.
+  useDismiss(wrapRef, open && jobs.length > 0, onClose, { outside: false });
   if (!jobs.length) return null;
 
   const activeCount = jobs.filter(isActiveJob).length;
@@ -220,7 +227,7 @@ export function Activity({ open, onToggle, ...list }: ActivityProps) {
   const Icon = activeCount ? LoaderCircle : failedCount ? AlertTriangle : Check;
 
   return (
-    <div className="activity-wrap">
+    <div className="activity-wrap" ref={wrapRef}>
       <button
         className="activity-button"
         onClick={onToggle}

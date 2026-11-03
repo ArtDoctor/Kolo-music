@@ -391,8 +391,6 @@ async function runYoutube(record: JobRecord, input: YoutubeInput) {
         "mp3",
         "--audio-quality",
         "0",
-        "--postprocessor-args",
-        "ExtractAudio:-af loudnorm=I=-16:TP=-1.5:LRA=11",
         // Partial and unconverted files stay out of the playlist folder, so
         // a library scan never lists them.
         "-P",

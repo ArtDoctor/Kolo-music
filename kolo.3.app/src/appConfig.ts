@@ -117,12 +117,66 @@ export function tracksInPlaylist(tracks: Track[], id: string): Track[] {
   return tracks.filter((track) => track.playlistId === id);
 }
 
-export function formatTime(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds <= 0) return "—";
+export function formatTime(seconds: number, empty = "—"): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return empty;
   return `${Math.floor(seconds / 60)}:${Math.floor(seconds % 60)
     .toString()
     .padStart(2, "0")}`;
 }
+
+// Playlist length for headers: "48 min" or "3 hr 12 min".
+export function formatTotalDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 60) return "";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours} hr ${minutes % 60} min`;
+}
+
+// yt-dlp names files "Title-<video id>"; the id is noise in a song title.
+// Only an 11-character token mixing digits and both letter cases is treated
+// as an id, so ordinary trailing words survive.
+const VIDEO_ID_SUFFIX = /^(.*?\S)[\s_-]+\[?([A-Za-z0-9_-]{11})\]?$/;
+const TRAILING_TAG = /^(.*?\S)\s*[([]([^()[\]]*)[)\]]$/;
+// A trailing tag is dropped only when every word in it is one of these, so
+// "(Official Video)" goes but "(from Moana / Official Video)" stays.
+const VIDEO_TAG_WORDS =
+  /\b(official|oficial|offizielles|music|musik|musikvideo|video|audio|lyrics?|visuali[sz]er|animated|hd|hq|4k|mv|m[/⧸]v)\b/gi;
+
+function isVideoTag(tag: string) {
+  return (
+    tag.replace(VIDEO_TAG_WORDS, "").replace(/[\s\-–—|⧸/.,:]+/g, "") === ""
+  );
+}
+
+export function cleanTitle(title: string): string {
+  let clean = title;
+  const id = VIDEO_ID_SUFFIX.exec(clean);
+  if (id && /\d/.test(id[2]) && /[a-z]/.test(id[2]) && /[A-Z]/.test(id[2]))
+    clean = id[1];
+  for (
+    let tag = TRAILING_TAG.exec(clean);
+    tag && isVideoTag(tag[2]);
+    tag = TRAILING_TAG.exec(clean)
+  )
+    clean = tag[1];
+  return clean;
+}
+
+export const RATING_FILTERS: Record<
+  Exclude<RatingFilterType, "all">,
+  (track: Track) => boolean
+> = {
+  "5": (track) => track.rating === 5,
+  "4.5": (track) => (track.rating ?? 0) >= 4.5,
+  "4": (track) => (track.rating ?? 0) >= 4,
+  "3.5": (track) => (track.rating ?? 0) >= 3.5,
+  rated: (track) => track.rating !== null && track.rating > 0,
+  unrated: (track) =>
+    track.rating === null &&
+    track.playlistId !== "negative" &&
+    !track.id.startsWith("neg/"),
+};
 
 export function playlistIcon(id: string) {
   if (id === "liked") return Heart;

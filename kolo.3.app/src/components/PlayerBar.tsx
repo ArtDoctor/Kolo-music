@@ -45,6 +45,7 @@ export function PlayerBar({
   onLike,
   onSelectArtist,
   onSearchYouTube,
+  onReveal,
 }: {
   track: Track;
   isPlaying: boolean;
@@ -66,6 +67,8 @@ export function PlayerBar({
   onLike: () => void;
   onSelectArtist: (artist: string) => void;
   onSearchYouTube: (track: Track) => void;
+  // Shows the playing song in its list.
+  onReveal: () => void;
 }) {
   const RepeatIcon = repeatMode === "one" ? Repeat1 : Repeat;
   const artists = useMemo(() => splitArtists(track.artist), [track.artist]);
@@ -114,10 +117,25 @@ export function PlayerBar({
   return (
     <footer className="player-bar">
       <div className="now-playing">
-        <Artwork track={track} size="medium" />
+        <button
+          type="button"
+          className="now-playing-art"
+          onClick={onReveal}
+          title="Show in list"
+          aria-label={`Show ${track.title} in list`}
+        >
+          <Artwork track={track} size="medium" />
+        </button>
         <div>
           <div className="track-title-heading">
-            <strong>{track.title}</strong>
+            <button
+              type="button"
+              className="now-playing-title"
+              onClick={onReveal}
+              title="Show in list"
+            >
+              <strong>{track.title}</strong>
+            </button>
             <button
               type="button"
               className="youtube-search-btn"
@@ -198,7 +216,7 @@ export function PlayerBar({
           </button>
         </div>
         <div className="progress-row">
-          <span>{formatTime(displayProgress)}</span>
+          <span>{formatTime(displayProgress, "0:00")}</span>
           <input
             className="range"
             aria-label="Song progress"

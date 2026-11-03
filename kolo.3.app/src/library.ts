@@ -1,6 +1,7 @@
 import { convertFileSrc, invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { cleanTitle } from "./appConfig";
 import type { LibrarySnapshot, Playlist, Track } from "./types";
 
 function artworkFor(id: string) {
@@ -17,6 +18,7 @@ function normalize(snapshot: LibrarySnapshot): LibrarySnapshot {
     ...snapshot,
     tracks: snapshot.tracks.map((track): Track => ({
       ...track,
+      title: cleanTitle(track.title),
       rating: track.rating ?? null,
       aiRating: track.aiRating ?? null,
       liked: track.liked ?? false,

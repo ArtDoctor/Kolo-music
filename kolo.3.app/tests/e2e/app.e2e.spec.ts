@@ -150,6 +150,14 @@ test("rates in half-star steps but only hearts add songs to Liked songs", async 
   const bounds = await fourthStar.boundingBox();
   expect(bounds).not.toBeNull();
 
+  // Hovering the left half previews a half star.
+  await fourthStar.hover({
+    position: { x: 2, y: Math.floor(bounds!.height / 2) },
+  });
+  await expect(
+    fourthStar.locator(".star-fill").evaluate((el) => el.style.clipPath),
+  ).resolves.toBe("inset(0px 50% 0px 0px)");
+
   let saved = page.waitForResponse(
     (response) =>
       response.url().endsWith("/api/ratings") &&
@@ -816,4 +824,143 @@ test("bottom player bar shows larger stars and compact height", async ({
   const playerStars = page.locator(".player-bar .now-playing .star-rating");
   await expect(playerStars).toBeVisible();
   await expect(playerStars).not.toHaveClass(/star-rating--compact/);
+});
+
+test("rates and likes the playing song from the keyboard", async ({ page }) => {
+  await page.getByRole("button", { name: /Phone music/ }).click();
+  const row = page.getByTestId("track-row").filter({ hasText: "Neon Sky" });
+  await row.click();
+  await expect(page.locator(".now-playing strong")).toHaveText("Neon Sky");
+  const rating = row.getByTestId("star-rating");
+
+  await page.keyboard.press("Digit4");
+  await expect(rating).toHaveAttribute("data-rating", "4");
+  await expect(page.locator(".toast")).toContainText("Rated “Neon Sky” 4");
+  await page.keyboard.press("Shift+Digit5");
+  await expect(rating).toHaveAttribute("data-rating", "4.5");
+  await page.keyboard.press("Digit0");
+  await expect(rating).toHaveAttribute("data-rating", "");
+
+  await page.keyboard.press("KeyL");
+  await expect(
+    row.getByRole("button", { name: "Unlike song", exact: true }),
+  ).toBeVisible();
+
+  // Typing in the search box must not trigger shortcuts.
+  await page.keyboard.press("Slash");
+  await expect(page.getByPlaceholder("Search your music")).toBeFocused();
+  await page.keyboard.type("4");
+  // The first Escape clears the search, the second leaves the box.
+  await page.keyboard.press("Escape");
+  await expect(page.getByPlaceholder("Search your music")).toHaveValue("");
+  await expect(rating).toHaveAttribute("data-rating", "");
+  await page.keyboard.press("Escape");
+  await expect(page.getByPlaceholder("Search your music")).not.toBeFocused();
+
+  await page.keyboard.press("Shift+Slash");
+  await expect(
+    page.getByRole("dialog", { name: "Keyboard shortcuts" }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(
+    page.getByRole("dialog", { name: "Keyboard shortcuts" }),
+  ).toHaveCount(0);
+});
+
+test("filter chips count what each filter would show", async ({ page }) => {
+  await page.getByRole("button", { name: /Phone music/ }).click();
+  const chips = page.getByRole("group", { name: "Filter by rating" });
+  await expect(chips.getByRole("button", { name: /^All/ })).toHaveText("All 2");
+  await expect(chips.getByRole("button", { name: /Non-rated/ })).toHaveText(
+    "Non-rated 2",
+  );
+  await chips.getByRole("button", { name: /Non-rated/ }).click();
+  await expect(
+    chips.getByRole("button", { name: /Non-rated/ }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("track-row")).toHaveCount(2);
+});
+
+test("hides video ids and video tags in song titles", async ({ page }) => {
+  const path = resolve(
+    import.meta.dirname,
+    "../../.playwright-data/pos/Clip Artist - Night Drive (Official Video) [dQw4w9WgXcQ].wav",
+  );
+  try {
+    await writeFile(path, createTestWav(440, 0.1));
+    await page.reload();
+    await page.getByRole("button", { name: /Phone music/ }).click();
+    await expect(
+      page.getByTestId("track-row").getByText("Night Drive", { exact: true }),
+    ).toBeVisible();
+  } finally {
+    await unlink(path);
+  }
+});
+
+test("closes the profile menu and queue without reaching for a button", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: "Open profile" }).click();
+  await expect(page.locator(".profile-menu")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".profile-menu")).toHaveCount(0);
+  await page.getByRole("button", { name: "Open profile" }).click();
+  await page.getByRole("heading", { name: "Welcome to Kolo" }).click();
+  await expect(page.locator(".profile-menu")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Open queue" }).click();
+  await expect(page.locator(".queue-panel")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".queue-panel")).toHaveCount(0);
+});
+
+test("shows the playing song in its list from the player bar", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: /Phone music/ }).click();
+  await page.getByTestId("track-row").filter({ hasText: "Neon Sky" }).click();
+  await page.getByRole("button", { name: /Old playlist/ }).click();
+  await page.locator(".now-playing-title").click();
+  await expect(
+    page.getByRole("heading", { name: "Phone music" }),
+  ).toBeVisible();
+  await expect(
+    page.getByTestId("track-row").filter({ hasText: "Neon Sky" }),
+  ).toHaveClass(/revealed/);
+});
+
+test("restores the song, queue, shuffle, and repeat after a restart, paused", async ({
+  page,
+}) => {
+  await page.getByRole("button", { name: /Phone music/ }).click();
+  await page.getByTestId("track-row").filter({ hasText: "Neon Sky" }).click();
+  await expect(
+    page.getByRole("button", { name: "Pause", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Shuffle", exact: true }).click();
+  await page.getByRole("button", { name: "Repeat off" }).click();
+  await page.getByRole("slider", { name: "Song progress" }).fill("2");
+  await page.getByRole("button", { name: "Pause", exact: true }).click();
+  await page.reload();
+  await expect(page.locator(".now-playing strong")).toHaveText(/Neon Sky/);
+  await expect(
+    page.getByRole("button", { name: "Play", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Shuffle", exact: true }),
+  ).toHaveClass(/enabled/);
+  await expect(page.getByRole("button", { name: "Repeat all" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Phone music" }),
+  ).toBeVisible();
+  await expect
+    .poll(() =>
+      page
+        .locator("audio")
+        .evaluate((element: HTMLAudioElement) => element.currentTime),
+    )
+    .toBeGreaterThan(1.5);
+  await page.getByRole("button", { name: "Open queue" }).click();
+  await expect(page.getByText("Playing from Phone music")).toBeVisible();
 });

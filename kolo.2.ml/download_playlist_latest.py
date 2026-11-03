@@ -16,7 +16,31 @@ import uuid
 import yt_dlp
 from mutagen.id3 import ID3, TIT2, TPE1
 from mutagen.mp3 import MP3
+from rapidfuzz import fuzz
 from SpotipyFree import Spotify
+from ytmusicapi import YTMusic
+
+# Words that mark a different rendition of a song. A candidate containing one
+# is rejected unless the Spotify title contains it too.
+VARIANT_WORDS = (
+    "live", "concert", "cover", "remix", "karaoke", "instrumental", "acapella",
+    "a cappella", "acoustic", "sped up", "speed up", "slowed", "reverb",
+    "nightcore", "bass boosted", "8d", "reaction", "tutorial", "lesson",
+    "mashup", "edit", "extended", "demo", "rehearsal", "session",
+)
+# A candidate with one of these is never a single song.
+COMPILATION_WORDS = (
+    "playlist", "full album", "compilation", "mix", "megamix", "nonstop",
+    "non-stop", "1 hour", "10 hours", "hour loop", "timecode", "tracklist",
+)
+# Decoration in YouTube video titles that says nothing about the recording.
+VIDEO_NOISE = re.compile(
+    r"\b(official( music| lyric)?( video| audio| visualizer)?|lyrics?( video)?|"
+    r"music video|visuali[sz]er|audio|video|hd|hq|4k|explicit|clean)\b",
+    re.IGNORECASE,
+)
+
+_thread_state = threading.local()
 
 
 def sanitize_filename(name: str) -> str:
@@ -96,6 +120,146 @@ def tag_clean_metadata(file_path: str, title: str, artist: str):
         pass
 
 
+def _ytmusic() -> YTMusic:
+    # YTMusic holds a requests session, so each worker thread gets its own.
+    client = getattr(_thread_state, "ytmusic", None)
+    if client is None:
+        client = YTMusic()
+        _thread_state.ytmusic = client
+    return client
+
+
+def _normalize(text: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", text.lower())).strip()
+
+
+def _core_title(title: str) -> str:
+    """Drop featuring credits and remaster/version suffixes from a title."""
+    core = re.sub(r"[(\[]\s*(feat|ft|with)\.?\s[^)\]]*[)\]]", "", title, flags=re.IGNORECASE)
+    core = re.sub(r"\s-\s.*(remaster|version|edit|mono|stereo|mix).*$", "", core, flags=re.IGNORECASE)
+    return _normalize(core)
+
+
+def _has_word(text: str, word: str) -> bool:
+    return re.search(rf"(?<!\w){re.escape(_normalize(word))}(?!\w)", text) is not None
+
+
+def _artist_score(artists: list[str], candidate: str) -> float:
+    """How well the best-matching Spotify artist appears in ``candidate``."""
+    candidate = _normalize(candidate)
+    if not candidate:
+        return 0.0
+    return max((fuzz.partial_ratio(_normalize(a), candidate) for a in artists if a), default=0.0)
+
+
+def _score_candidate(
+    title: str,
+    artists: list[str],
+    duration: float | None,
+    cand_title: str,
+    cand_artists: str,
+    cand_duration: float | None,
+    is_song: bool,
+) -> float | None:
+    """Score a YouTube candidate from 0-100, or None when it is the wrong recording."""
+    if not cand_title or not cand_duration:
+        return None
+    wanted = _normalize(title)
+    full = _normalize(cand_title)
+    for word in COMPILATION_WORDS:
+        if _has_word(full, word) and not _has_word(wanted, word):
+            return None
+    for word in VARIANT_WORDS:
+        if _has_word(full, word) and not _has_word(wanted, word):
+            return None
+
+    if duration:
+        # YouTube Music songs are the same master as Spotify, so they match to a
+        # second or two; videos can carry an intro or outro.
+        tolerance = max(4.0, duration * 0.03) if is_song else max(10.0, duration * 0.08)
+        diff = abs(cand_duration - duration)
+        if diff > tolerance:
+            return None
+        duration_score = 100 * (1 - diff / tolerance)
+    else:
+        if cand_duration > 15 * 60:
+            return None
+        duration_score = 50.0
+
+    artist_score = _artist_score(artists, cand_artists)
+    if is_song:
+        cand_core = _core_title(cand_title)
+    else:
+        # Video titles look like "Artist - Song (Official Video)".
+        artist_score = max(artist_score, _artist_score(artists, cand_title))
+        stripped = re.sub(r"[(\[][^)\]]*[)\]]", " ", cand_title)
+        for artist in artists:
+            stripped = re.sub(re.escape(artist), " ", stripped, flags=re.IGNORECASE)
+        cand_core = _core_title(VIDEO_NOISE.sub(" ", stripped))
+    title_score = fuzz.token_sort_ratio(_core_title(title), cand_core)
+
+    if title_score < 75 or artist_score < 70:
+        return None
+    return 0.45 * title_score + 0.25 * artist_score + 0.30 * duration_score
+
+
+def find_youtube_match(title: str, artists: list[str], duration: float | None) -> str | None:
+    """Return the YouTube video ID of the recording that matches a Spotify track.
+
+    YouTube Music's song search is tried first because it returns the official
+    release. Plain YouTube is a fallback for songs missing from it.
+    """
+    best: tuple[float, str] | None = None
+    queries = [f"{' '.join(artists)} {title}"]
+    if len(artists) > 1:
+        queries.append(f"{artists[0]} {title}")
+
+    for query in queries:
+        try:
+            results = _ytmusic().search(query, filter="songs", limit=10)
+        except Exception:
+            results = []
+        for item in results[:10]:
+            video_id = item.get("videoId")
+            if not video_id:
+                continue
+            score = _score_candidate(
+                title,
+                artists,
+                duration,
+                item.get("title") or "",
+                " ".join(a.get("name", "") for a in item.get("artists") or []),
+                item.get("duration_seconds"),
+                is_song=True,
+            )
+            if score is not None and (best is None or score > best[0]):
+                best = (score, video_id)
+        if best:
+            return best[1]
+
+    search_opts = {"quiet": True, "no_warnings": True, "extract_flat": "in_playlist", "skip_download": True}
+    try:
+        with yt_dlp.YoutubeDL(search_opts) as ydl:
+            info = ydl.extract_info(f"ytsearch10:{' '.join(artists)} {title}", download=False) or {}
+    except Exception:
+        info = {}
+    for entry in info.get("entries") or []:
+        if not entry or not entry.get("id"):
+            continue
+        score = _score_candidate(
+            title,
+            artists,
+            duration,
+            entry.get("title") or "",
+            entry.get("channel") or entry.get("uploader") or "",
+            entry.get("duration"),
+            is_song=False,
+        )
+        if score is not None and (best is None or score > best[0]):
+            best = (score, entry["id"])
+    return best[1] if best else None
+
+
 def download_track(track_info: dict, output_dir: str, bitrate: str = "320", staging_dir: str | None = None) -> bool:
     """Download a single track using yt-dlp, extract MP3, and embed cover artwork.
 
@@ -131,27 +295,23 @@ def download_track(track_info: dict, output_dir: str, bitrate: str = "320", stag
                 "key": "FFmpegMetadata",
             },
         ],
-        "postprocessor_args": {
-            "ExtractAudio": ["-af", "loudnorm=I=-16:TP=-1.5:LRA=11"]
-        },
         "quiet": True,
         "no_warnings": True,
     }
 
-    # Primary query with quotes to avoid mismatched artists/songs, followed by fallback queries
-    search_queries = [
-        f'ytsearch1:"{title}" "{artists}" audio',
-        f'ytsearch1:"{title}" "{artists}"',
-        f"ytsearch1:{artists} - {title} audio",
-        f"ytsearch1:{artists} - {title}",
-    ]
+    artist_names = [a["name"] for a in track_info.get("artists", []) if a.get("name")]
+    duration_ms = track_info.get("duration_ms")
+    video_id = find_youtube_match(title, artist_names, duration_ms / 1000 if duration_ms else None)
+    if not video_id:
+        return False
 
     try:
         success = False
-        for query in search_queries:
+        # Retry once in case of a transient network error.
+        for _attempt in range(2):
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([query])
+                    ydl.download([f"https://www.youtube.com/watch?v={video_id}"])
 
                 downloaded_mp3 = f"{tmp_out}.mp3"
                 if not os.path.exists(downloaded_mp3):
@@ -174,15 +334,15 @@ def download_track(track_info: dict, output_dir: str, bitrate: str = "320", stag
                         art_dir = data_root / ".kolo" / "artwork"
                         art_dir.mkdir(parents=True, exist_ok=True)
                         target_art = art_dir / f"{h}.jpg"
-                        if not target_art.exists():
-                            import mutagen
-                            m = mutagen.File(target_path)
-                            if m and hasattr(m, "tags") and m.tags:
-                                for k in m.tags.keys():
-                                    if k.startswith("APIC") and getattr(m.tags[k], "data", None):
-                                        with open(target_art, "wb") as afp:
-                                            afp.write(m.tags[k].data)
-                                        break
+                        # A fresh download replaces any stale cached artwork.
+                        import mutagen
+                        m = mutagen.File(target_path)
+                        if m and hasattr(m, "tags") and m.tags:
+                            for k in m.tags.keys():
+                                if k.startswith("APIC") and getattr(m.tags[k], "data", None):
+                                    with open(target_art, "wb") as afp:
+                                        afp.write(m.tags[k].data)
+                                    break
                     except Exception:
                         pass
 

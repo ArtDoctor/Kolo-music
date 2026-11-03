@@ -1,11 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type Dispatch,
-  type SetStateAction,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   cancelJob,
   clearFinishedJobs,
@@ -18,7 +11,7 @@ import {
   type DownloadRequest,
   type RatingRequest,
 } from "../jobs";
-import type { Job, LibrarySnapshot } from "../types";
+import type { Job, LibrarySnapshot, Notify } from "../types";
 
 const POLL_INTERVAL_MS = 700;
 // Jobs report every finished song; reloading the library that often would
@@ -27,7 +20,7 @@ const REFRESH_INTERVAL_MS = 1500;
 
 interface JobsOptions {
   refreshLibrary: () => Promise<LibrarySnapshot | undefined>;
-  setNotice: Dispatch<SetStateAction<string | null>>;
+  setNotice: Notify;
 }
 
 function message(reason: unknown, fallback: string) {
@@ -93,7 +86,10 @@ export function useJobs({ refreshLibrary, setNotice }: JobsOptions) {
         (previous.status === "queued" || previous.status === "running") &&
         (job.status === "done" || job.status === "error")
       )
-        setNotice(finishedNotice(job));
+        setNotice(
+          finishedNotice(job),
+          job.status === "error" ? "error" : "info",
+        );
       seen.set(job.id, { status: job.status, revision: job.revision });
     }
     for (const id of seen.keys()) {
@@ -127,7 +123,10 @@ export function useJobs({ refreshLibrary, setNotice }: JobsOptions) {
           remember(result.value);
           started += 1;
         } else {
-          setNotice(message(result.reason, "Could not start the download."));
+          setNotice(
+            message(result.reason, "Could not start the download."),
+            "error",
+          );
         }
       }
       await syncJobs();
@@ -141,7 +140,7 @@ export function useJobs({ refreshLibrary, setNotice }: JobsOptions) {
       try {
         remember(await startRating(request));
       } catch (reason) {
-        setNotice(message(reason, "Could not start rating."));
+        setNotice(message(reason, "Could not start rating."), "error");
       }
       await syncJobs();
     },
@@ -153,7 +152,7 @@ export function useJobs({ refreshLibrary, setNotice }: JobsOptions) {
       try {
         await action();
       } catch (reason) {
-        setNotice(message(reason, "That did not work."));
+        setNotice(message(reason, "That did not work."), "error");
       }
       await syncJobs();
     },

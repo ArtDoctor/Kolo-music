@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { Track } from "../types";
 import { Artwork } from "./Artwork";
 
@@ -18,10 +18,10 @@ export function QueuePanel({
 }) {
   const [visibleCount, setVisibleCount] = useState(60);
   const sentinel = useRef<HTMLDivElement>(null);
-  const currentIndex = Math.max(
-    0,
-    tracks.findIndex((track) => track.id === currentId),
-  );
+  const playingIndex = tracks.findIndex((track) => track.id === currentId);
+  const currentIndex = Math.max(0, playingIndex);
+  // The song playing may not be in this queue; then every row is upcoming.
+  const upNextFrom = playingIndex === -1 ? 0 : 1;
   const ordered = [
     ...tracks.slice(currentIndex),
     ...tracks.slice(0, currentIndex),
@@ -54,18 +54,27 @@ export function QueuePanel({
       </header>
       <div className="queue-list">
         {ordered.slice(0, visibleCount).map((track, index) => (
-          <button
-            key={track.id}
-            className={track.id === currentId ? "active" : ""}
-            onClick={() => onPlay(track)}
-          >
-            <span>{index + 1}</span>
-            <Artwork track={track} size="small" />
-            <span>
-              <strong>{track.title}</strong>
-              <small>{track.artist}</small>
-            </span>
-          </button>
+          <Fragment key={track.id}>
+            {index === 0 && upNextFrom === 1 && (
+              <h3 className="queue-section">Now playing</h3>
+            )}
+            {index === upNextFrom && (
+              <h3 className="queue-section">
+                Next up <small>{ordered.length - upNextFrom}</small>
+              </h3>
+            )}
+            <button
+              className={track.id === currentId ? "active" : ""}
+              onClick={() => onPlay(track)}
+            >
+              <span>{index < upNextFrom ? "" : index + 1 - upNextFrom}</span>
+              <Artwork track={track} size="small" />
+              <span>
+                <strong>{track.title}</strong>
+                <small>{track.artist}</small>
+              </span>
+            </button>
+          </Fragment>
         ))}
         {visibleCount < ordered.length && (
           <div ref={sentinel} className="list-sentinel" aria-hidden="true" />

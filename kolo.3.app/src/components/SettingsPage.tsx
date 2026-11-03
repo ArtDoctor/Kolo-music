@@ -61,15 +61,7 @@ export function SettingsPage({
             came from.
           </p>
         </div>
-        <label
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "10px",
-            cursor: "pointer",
-            fontSize: "13px",
-          }}
-        >
+        <label className="setting-switch">
           <input
             type="checkbox"
             checked={settings.loudnessLimiter ?? true}

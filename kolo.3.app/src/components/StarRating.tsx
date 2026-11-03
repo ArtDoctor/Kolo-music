@@ -1,5 +1,5 @@
 import { Star } from "lucide-react";
-import { useState, type MouseEvent } from "react";
+import { useState, type KeyboardEvent, type MouseEvent } from "react";
 
 interface StarRatingProps {
   value: number | null;
@@ -27,10 +27,30 @@ export function StarRating({
     return index + (event.clientX - bounds.left < bounds.width / 2 ? 0.5 : 1);
   }
 
+  // The stars share one tab stop; arrow keys step the rating by half a star.
+  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const step =
+      event.key === "ArrowRight" || event.key === "ArrowUp"
+        ? 0.5
+        : event.key === "ArrowLeft" || event.key === "ArrowDown"
+          ? -0.5
+          : 0;
+    if (!step) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const next = Math.max(0, Math.min(5, (value ?? 0) + step));
+    onChange(next === 0 ? null : next);
+    const buttons = event.currentTarget.querySelectorAll("button");
+    buttons[Math.max(0, Math.ceil(next) - 1)]?.focus();
+  }
+
+  const focusIndex = Math.max(0, Math.ceil(value ?? 0) - 1);
+
   return (
     <div
       className={`star-rating ${compact ? "star-rating--compact" : ""} ${aiShown > 0 ? "has-ai-prediction" : ""}`}
       onMouseLeave={() => setPreview(null)}
+      onKeyDown={onKeyDown}
       aria-label="Personal rating"
       data-testid="star-rating"
       data-rating={value ?? ""}
@@ -50,11 +70,15 @@ export function StarRating({
             key={index}
             type="button"
             className={isBouncing ? "star-bouncing" : ""}
+            tabIndex={index === focusIndex ? 0 : -1}
             onAnimationEnd={() => setBouncingIndex(null)}
             onMouseMove={(event) => setPreview(candidate(event, index))}
             onClick={(event) => {
               event.stopPropagation();
-              const next = candidate(event, index);
+              // A keyboard click has no pointer position (detail is 0, which
+              // is also true of every mousemove); it rates the whole star.
+              const next =
+                event.detail === 0 ? index + 1 : candidate(event, index);
               setBouncingIndex(index);
               onChange(value === next ? null : next);
             }}

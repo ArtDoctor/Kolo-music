@@ -9,7 +9,14 @@ import {
   Sparkles,
   Upload,
 } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import {
   formatTime,
   playlistIcon,
@@ -23,39 +30,55 @@ import { StarRating } from "./StarRating";
 
 export function PlaylistHeader({
   playlist,
+  totalDuration = "",
   unratedCount = 0,
   ratingJob,
-  onImport,
+  canImport = true,
+  onPlay,
   onShuffle,
+  onImport,
   onLink,
   onRateUnrated,
 }: {
   playlist: Playlist | null;
+  totalDuration?: string;
   // Songs here with neither a personal rating nor a model estimate.
   unratedCount?: number;
   // The rating run that is working through this playlist, if any.
   ratingJob?: Job;
-  onImport: () => void;
+  // Folder playlists accept files and links; filtered views do not.
+  canImport?: boolean;
+  onPlay: () => void;
   onShuffle: () => void;
+  onImport: () => void;
   onLink: () => void;
   onRateUnrated?: () => void;
 }) {
   const Icon = playlist ? playlistIcon(playlist.id) : Music2;
+  const count = playlist?.count ?? 0;
   return (
     <section className="playlist-header">
       <div className="playlist-cover">
         <Icon fill={playlist?.id === "liked" ? "currentColor" : "none"} />
       </div>
-      <div>
-        <h1>{playlist?.name ?? "Playlist"}</h1>
-        <p>{playlist?.count ?? 0} songs</p>
+      <div className="playlist-heading">
+        <h1 title={playlist?.name}>{playlist?.name ?? "Playlist"}</h1>
+        <p>
+          {count} {count === 1 ? "song" : "songs"}
+          {totalDuration && <> · {totalDuration}</>}
+        </p>
       </div>
       <div className="playlist-actions">
-        <button onClick={onShuffle}>
-          <Shuffle /> Shuffle play
+        <button
+          className="playlist-play"
+          onClick={onPlay}
+          disabled={!count}
+          aria-label="Play all songs"
+        >
+          <Play fill="currentColor" /> Play
         </button>
-        <button onClick={onImport}>
-          <Upload /> Import songs
+        <button onClick={onShuffle} disabled={!count}>
+          <Shuffle /> Shuffle play
         </button>
         {onRateUnrated && (ratingJob || unratedCount > 0) && (
           <button
@@ -69,9 +92,20 @@ export function PlaylistHeader({
               : `Rate ${unratedCount} unrated`}
           </button>
         )}
-        <button onClick={onLink} aria-label="Add link or search">
-          <Link2 />
-        </button>
+        {canImport && (
+          <>
+            <button onClick={onImport}>
+              <Upload /> Import songs
+            </button>
+            <button
+              onClick={onLink}
+              aria-label="Add link or search"
+              title="Add a YouTube or Spotify link"
+            >
+              <Link2 />
+            </button>
+          </>
+        )}
       </div>
     </section>
   );
@@ -92,25 +126,61 @@ export const TrackList = memo(function TrackList({
   isPlaying,
   sortBy = "date",
   sortOrder = "desc",
+  revealRequest = null,
+  emptyHint = "Import music or change your search and filter.",
   onSort,
   onPlay,
   onRate,
   onLike,
   onSelectArtist,
+  onRevealed,
 }: {
   tracks: Track[];
   currentId: string | null;
   isPlaying: boolean;
   sortBy?: SortByType;
   sortOrder?: SortOrderType;
+  // A song to scroll to and briefly highlight.
+  revealRequest?: { id: string; key: number } | null;
+  emptyHint?: string;
   onSort?: (field: SortByType) => void;
   onPlay: (track: Track) => void;
   onRate: (track: Track, rating: number | null) => void;
   onLike: (track: Track) => void;
   onSelectArtist: (artist: string) => void;
+  onRevealed?: () => void;
 }) {
   const [visibleCount, setVisibleCount] = useState(60);
+  const [flashId, setFlashId] = useState<string | null>(null);
   const loadMoreRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLDivElement>(null);
+
+  // Rows render progressively, so a song far down the list is rendered first
+  // and scrolled to on the next pass.
+  useEffect(() => {
+    if (!revealRequest) return;
+    const index = tracks.findIndex((track) => track.id === revealRequest.id);
+    if (index === -1) {
+      onRevealed?.();
+      return;
+    }
+    if (index >= visibleCount) {
+      setVisibleCount(Math.min(tracks.length, index + 20));
+      return;
+    }
+    const row = tableRef.current?.querySelector(
+      `[data-track-id="${CSS.escape(revealRequest.id)}"]`,
+    );
+    row?.scrollIntoView({ block: "center", behavior: "smooth" });
+    setFlashId(revealRequest.id);
+    onRevealed?.();
+  }, [revealRequest, tracks, visibleCount, onRevealed]);
+
+  useEffect(() => {
+    if (!flashId) return;
+    const timeout = window.setTimeout(() => setFlashId(null), 1600);
+    return () => window.clearTimeout(timeout);
+  }, [flashId]);
 
   useEffect(() => {
     const target = loadMoreRef.current;
@@ -131,11 +201,11 @@ export const TrackList = memo(function TrackList({
       <div className="empty-state">
         <Music2 />
         <h2>No songs here yet</h2>
-        <p>Import music or change your search and filter.</p>
+        <p>{emptyHint}</p>
       </div>
     );
   return (
-    <div className="track-table">
+    <div className="track-table" ref={tableRef}>
       <div className="track-head">
         <button
           type="button"
@@ -223,6 +293,7 @@ export const TrackList = memo(function TrackList({
           index={index}
           active={track.id === currentId}
           playing={track.id === currentId && isPlaying}
+          flash={track.id === flashId}
           onPlay={onPlay}
           onRate={onRate}
           onLike={onLike}
@@ -241,6 +312,7 @@ const TrackRow = memo(function TrackRow({
   index,
   active,
   playing,
+  flash,
   onPlay,
   onRate,
   onLike,
@@ -250,6 +322,7 @@ const TrackRow = memo(function TrackRow({
   index: number;
   active: boolean;
   playing: boolean;
+  flash: boolean;
   onPlay: (track: Track) => void;
   onRate: (track: Track, rating: number | null) => void;
   onLike: (track: Track) => void;
@@ -259,12 +332,20 @@ const TrackRow = memo(function TrackRow({
 
   return (
     <div
-      className={`track-row ${active ? "active" : ""}`}
+      className={`track-row ${active ? "active" : ""} ${flash ? "revealed" : ""}`}
       onClick={() => onPlay(track)}
       data-testid="track-row"
       data-track-id={track.id}
     >
-      <span className="track-index">
+      <button
+        type="button"
+        className="track-index"
+        onClick={(event) => {
+          event.stopPropagation();
+          onPlay(track);
+        }}
+        aria-label={`${playing ? "Pause" : "Play"} ${track.title}`}
+      >
         {playing ? (
           <span className="playing-bars">
             <i />
@@ -277,7 +358,7 @@ const TrackRow = memo(function TrackRow({
             <Play className="row-play" fill="currentColor" />
           </>
         )}
-      </span>
+      </button>
       <span className="track-title">
         <Artwork track={track} size="small" />
         <span>
@@ -322,13 +403,19 @@ const TrackRow = memo(function TrackRow({
           onChange={(rating) => onRate(track, rating)}
         />
       </span>
-      <span className="vibe-value">
-        {track.vibeScore === null ? (
-          <Sparkles />
-        ) : (
-          `${Math.round(track.vibeScore * 100)}%`
-        )}
-      </span>
+      {track.vibeScore === null ? (
+        <span className="vibe-value empty" title="Not scored yet">
+          —
+        </span>
+      ) : (
+        <span
+          className={`vibe-value ${track.vibeScore >= 0.6 ? "high" : ""}`}
+          style={{ "--vibe": track.vibeScore } as CSSProperties}
+          title="How well this song matches your taste, according to the model"
+        >
+          {Math.round(track.vibeScore * 100)}%
+        </span>
+      )}
       <span className="track-time">{formatTime(track.duration)}</span>
     </div>
   );

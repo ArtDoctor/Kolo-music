@@ -3,7 +3,8 @@ import type { RatingFilterType } from "../appConfig";
 
 interface TrackFiltersProps {
   value: RatingFilterType;
-  totalTracks: number;
+  // Songs each chip would show, given the current search and artist.
+  counts: Record<RatingFilterType, number>;
   onChange: (value: RatingFilterType) => void;
 }
 
@@ -20,32 +21,31 @@ const ratingFilters: Array<{
   { value: "unrated", label: "Non-rated" },
 ];
 
-export function TrackFilters({
-  value,
-  totalTracks,
-  onChange,
-}: TrackFiltersProps) {
+export function TrackFilters({ value, counts, onChange }: TrackFiltersProps) {
   function toggle(filter: RatingFilterType) {
     onChange(value === filter ? "all" : filter);
   }
 
   return (
     <div className="filter-sort-bar">
-      <div className="filter-chips">
+      <div className="filter-chips" role="group" aria-label="Filter by rating">
         <button
           className={`filter-chip ${value === "all" ? "active" : ""}`}
           onClick={() => onChange("all")}
+          aria-pressed={value === "all"}
         >
-          All ({totalTracks})
+          All <span className="filter-count">{counts.all}</span>
         </button>
         {ratingFilters.map((filter) => (
           <button
             key={filter.value}
-            className={`filter-chip ${value === filter.value ? "active" : ""}`}
+            className={`filter-chip ${value === filter.value ? "active" : ""} ${counts[filter.value] ? "" : "empty"}`}
             onClick={() => toggle(filter.value)}
+            aria-pressed={value === filter.value}
           >
-            {filter.star && <Star size={13} fill="currentColor" />}{" "}
-            {filter.label}
+            {filter.star && <Star size={13} fill="currentColor" />}
+            {filter.label}{" "}
+            <span className="filter-count">{counts[filter.value]}</span>
           </button>
         ))}
       </div>
@@ -69,11 +69,12 @@ export function ArtistBanner({
   return (
     <div className="artist-active-banner">
       <span>
-        Showing songs featuring: <strong>{artist}</strong> ({trackCount})
+        Showing songs featuring: <strong>{artist}</strong>
+        <span className="filter-count">{trackCount}</span>
       </span>
-      <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+      <div className="artist-active-actions">
         <button type="button" onClick={onPlay}>
-          <Shuffle size={14} /> Play Artist
+          <Shuffle size={14} /> Shuffle artist
         </button>
         <button type="button" onClick={onClear}>
           <X size={14} /> Clear
